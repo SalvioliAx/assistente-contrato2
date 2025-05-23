@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from typing import Optional, List
 import re
-from datetime import datetime, date 
+from datetime import datetime, date
 import json
 from pathlib import Path
 
@@ -15,14 +15,15 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA, LLMChain
 from langchain.prompts import PromptTemplate
-from langchain.output_parsers import PydanticOutputParser, OutputFixingParser 
+from langchain.output_parsers import PydanticOutputParser, OutputFixingParser
+from langchain_core.messages import AIMessage # Para referência do tipo de objeto
 
 # --- DEFINIÇÕES GLOBAIS ---
 COLECOES_DIR = Path("colecoes_ia")
 COLECOES_DIR.mkdir(exist_ok=True)
 
 # --- SCHEMAS DE DADOS ---
-class InfoContrato(BaseModel): 
+class InfoContrato(BaseModel):
     arquivo_fonte: str = Field(description="O nome do arquivo de origem do contrato.")
     nome_banco: Optional[str] = Field(default="Não encontrado", description="O nome do banco ou instituição financeira emissora do cartão.")
     condicao_limite_credito: Optional[str] = Field(default="Não encontrado", description="Resumo da política de como o limite de crédito é definido, analisado e alterado.")
@@ -56,6 +57,7 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 def listar_colecoes_salvas():
     if not COLECOES_DIR.exists(): return []
     return [d.name for d in COLECOES_DIR.iterdir() if d.is_dir()]
+
 def salvar_colecao_atual(nome_colecao, vector_store_atual, nomes_arquivos_atuais):
     if not nome_colecao.strip(): st.error("Por favor, forneça um nome para a coleção."); return False
     caminho_colecao = COLECOES_DIR / nome_colecao
@@ -65,6 +67,7 @@ def salvar_colecao_atual(nome_colecao, vector_store_atual, nomes_arquivos_atuais
         with open(caminho_colecao / "manifest.json", "w") as f: json.dump(nomes_arquivos_atuais, f)
         st.success(f"Coleção '{nome_colecao}' salva com sucesso!"); return True
     except Exception as e: st.error(f"Erro ao salvar coleção: {e}"); return False
+
 @st.cache_resource(show_spinner="Carregando coleção...")
 def carregar_colecao(nome_colecao, _embeddings_obj):
     caminho_colecao = COLECOES_DIR / nome_colecao; caminho_indice = caminho_colecao / "faiss_index"; caminho_manifesto = caminho_colecao / "manifest.json"
@@ -78,7 +81,7 @@ def carregar_colecao(nome_colecao, _embeddings_obj):
 # --- FUNÇÕES DE PROCESSAMENTO DE DOCUMENTOS ---
 @st.cache_resource(show_spinner="Analisando documentos para busca e chat...")
 def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
-    if not lista_arquivos_pdf_upload or not google_api_key or not _embeddings_obj : return None, None 
+    if not lista_arquivos_pdf_upload or not google_api_key or not _embeddings_obj : return None, None
     documentos_totais = [];
     for arquivo_pdf in lista_arquivos_pdf_upload:
         temp_file_path = Path(arquivo_pdf.name)
@@ -100,7 +103,7 @@ def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> 
         "Se a informação não estiver no texto, responda com 'Não encontrado'.\n"
         "Seja conciso e direto.\n\n"
         "TEXTO:\n{contexto}\n\nRESUMO DA RESPOSTA:")
-    chain = LLMChain(llm=llm, prompt=prompt_template)
+    chain = LLMChain(llm=llm, prompt=prompt_template) # LLMChain retorna dict com 'text'
     resultados_finais = []
     barra_progresso = st.progress(0, text="Iniciando análise de políticas...")
     for i, nome_arquivo in enumerate(_nomes_arquivos):
@@ -113,14 +116,14 @@ def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> 
             "condicao_anuidade": "Qual é a política de cobrança da anuidade descrita no contrato?",
             "condicao_cancelamento": "Quais são as regras para o cancelamento ou rescisão do contrato?"}
         for campo, pergunta in mapa_campos_perguntas.items():
-            barra_progresso.progress((i + (list(mapa_campos_perguntas.keys()).index(campo) / len(mapa_campos_perguntas))) / len(_nomes_arquivos), 
+            barra_progresso.progress((i + (list(mapa_campos_perguntas.keys()).index(campo) / len(mapa_campos_perguntas))) / len(_nomes_arquivos),
                                      text=f"Analisando '{campo}' em {nome_arquivo}")
             docs_relevantes = retriever_arquivo_atual.get_relevant_documents(pergunta)
             contexto = "\n\n".join([doc.page_content for doc in docs_relevantes])
             if contexto:
                 try:
                     resultado = chain.invoke({"info_desejada": pergunta, "contexto": contexto})
-                    resposta = resultado['text'].strip()
+                    resposta = resultado['text'].strip() # Correto para LLMChain
                     dados_contrato_atual[campo] = resposta
                 except Exception as e_invoke:
                     st.warning(f"Erro ao invocar LLM para {campo} em {nome_arquivo}: {e_invoke}")
@@ -144,8 +147,8 @@ def gerar_resumo_executivo(arquivo_pdf_bytes, nome_arquivo_original):
         "prazo de vigência (se houver), principais obrigações financeiras ou condições de pagamento, e as "
         "principais condições ou motivos para rescisão ou cancelamento do contrato.\n"
         "Seja claro e direto.\n\nTEXTO DO CONTRATO:\n{texto_contrato}\n\nRESUMO EXECUTIVO:")
-    chain_resumo = LLMChain(llm=llm_resumo, prompt=template_prompt_resumo)
-    try: resultado = chain_resumo.invoke({"texto_contrato": texto_completo}); return resultado['text']
+    chain_resumo = LLMChain(llm=llm_resumo, prompt=template_prompt_resumo) # LLMChain retorna dict com 'text'
+    try: resultado = chain_resumo.invoke({"texto_contrato": texto_completo}); return resultado['text'] # Correto para LLMChain
     except Exception as e: return f"Erro ao gerar resumo: {e}"
 
 @st.cache_data(show_spinner="Analisando riscos no documento...")
@@ -161,15 +164,18 @@ def analisar_documento_para_riscos(texto_completo_doc, nome_arquivo_doc):
         "Concentre-se nos riscos mais impactantes. Se nenhum risco significativo for encontrado, declare isso explicitamente.\n"
         "Use formatação Markdown para sua resposta, com um título para cada risco.\n\n"
         "TEXTO DO CONTRATO ({nome_arquivo}):\n{texto_contrato}\n\nANÁLISE DE RISCOS:")
-    chain_riscos = LLMChain(llm=llm_riscos, prompt=prompt_riscos_template)
-    try: resultado = chain_riscos.invoke({"nome_arquivo": nome_arquivo_doc, "texto_contrato": texto_completo_doc}); return resultado['text']
+    chain_riscos = LLMChain(llm=llm_riscos, prompt=prompt_riscos_template) # LLMChain retorna dict com 'text'
+    try: resultado = chain_riscos.invoke({"nome_arquivo": nome_arquivo_doc, "texto_contrato": texto_completo_doc}); return resultado['text'] # Correto para LLMChain
     except Exception as e: return f"Erro ao analisar riscos para '{nome_arquivo_doc}': {e}"
 
+# --- FUNÇÃO DE EXTRAÇÃO DE EVENTOS (COM CORREÇÃO) ---
 @st.cache_data(show_spinner="Extraindo datas e prazos dos contratos...")
 def extrair_eventos_dos_contratos(textos_completos_docs: List[dict]) -> List[dict]:
     if not textos_completos_docs or not google_api_key: return []
-    llm_eventos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0, request_timeout=120)
+
+    llm_eventos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
     parser = PydanticOutputParser(pydantic_object=ListaDeEventos)
+
     prompt_eventos_template_str = """Analise o texto do contrato abaixo. Sua tarefa é identificar TODOS os eventos, datas, prazos e períodos importantes mencionados.
 Para cada evento encontrado, extraia as seguintes informações:
 1.  'descricao_evento': Uma descrição clara e concisa do evento (ex: 'Data de assinatura do contrato', 'Vencimento da primeira parcela', 'Prazo final para entrega do produto', 'Início da vigência', 'Período de carência para alteração de vencimento').
@@ -182,27 +188,44 @@ TEXTO DO CONTRATO ({arquivo_fonte}):
 {texto_contrato}
 
 ATENÇÃO: O campo 'data_evento_str' DEVE SEMPRE ser uma string. Se não houver data específica, use 'Não Especificado'.
-LISTA DE EVENTOS ENCONTRADOS:"""
+LISTA DE EVENTOS ENCONTRADOS:
+"""
     prompt_eventos = PromptTemplate(
         template=prompt_eventos_template_str,
         input_variables=["texto_contrato", "arquivo_fonte"],
         partial_variables={"format_instructions": parser.get_format_instructions().replace("```json", "").replace("```", "").strip()}
     )
-    output_fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1))
-    chain_eventos_llm_only = prompt_eventos | llm_eventos # Cadeia que só roda o LLM
+
+    output_fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.0)) # LLM para o fixing parser
+    
+    # Cadeia que só roda o LLM, para obter a string bruta primeiro
+    chain_eventos_llm_only = prompt_eventos | llm_eventos 
+
     todos_os_eventos_formatados = []
     barra_progresso = st.progress(0, text="Iniciando extração de datas...")
+
     for i, doc_info in enumerate(textos_completos_docs):
-        nome_arquivo, texto_contrato = doc_info["nome"], doc_info["texto"]
+        nome_arquivo = doc_info["nome"]
+        texto_contrato = doc_info["texto"]
         barra_progresso.progress((i + 1) / len(textos_completos_docs), text=f"Analisando datas em: {nome_arquivo}")
+        
         try:
-            resposta_ia_str = chain_eventos_llm_only.invoke({"texto_contrato": texto_contrato, "arquivo_fonte": nome_arquivo})['text']
+            # Etapa 1: Obter a resposta da IA como objeto AIMessage
+            resposta_ia_obj = chain_eventos_llm_only.invoke({
+                "texto_contrato": texto_contrato,
+                "arquivo_fonte": nome_arquivo
+            })
+            # CORREÇÃO: Acessar o conteúdo da AIMessage
+            resposta_ia_str = resposta_ia_obj.content 
+
+            # Etapa 2: Tentar parsear com o PydanticOutputParser
             try:
                 resultado_parseado = parser.parse(resposta_ia_str)
-            except Exception as e_parse:
-                st.write(f"Parser Pydantic inicial falhou para {nome_arquivo}, tentando com OutputFixingParser. Erro: {e_parse}")
-                st.write(f"Resposta da IA que causou o erro: {resposta_ia_str[:500]}...")
-                resultado_parseado = output_fixing_parser.parse(resposta_ia_str)
+            except Exception as e_parse: 
+                st.write(f"Parser Pydantic inicial falhou para {nome_arquivo}. Tentando com OutputFixingParser. Erro: {e_parse}")
+                st.write(f"Resposta da IA que causou o erro (primeiros 500 chars): {resposta_ia_str[:500]}...")
+                resultado_parseado = output_fixing_parser.parse(resposta_ia_str) # OutputFixingParser espera a string
+            
             if resultado_parseado and isinstance(resultado_parseado, ListaDeEventos):
                 for evento in resultado_parseado.eventos:
                     data_obj = None
@@ -211,15 +234,21 @@ LISTA DE EVENTOS ENCONTRADOS:"""
                         except ValueError:
                             try: data_obj = datetime.strptime(evento.data_evento_str, "%d/%m/%Y").date()
                             except ValueError: pass
+                    
                     todos_os_eventos_formatados.append({
-                        "Arquivo Fonte": nome_arquivo, "Evento": evento.descricao_evento,
-                        "Data Informada": evento.data_evento_str, "Data Objeto": data_obj,
-                        "Trecho Relevante": evento.trecho_relevante})
+                        "Arquivo Fonte": nome_arquivo,
+                        "Evento": evento.descricao_evento,
+                        "Data Informada": evento.data_evento_str,
+                        "Data Objeto": data_obj, 
+                        "Trecho Relevante": evento.trecho_relevante
+                    })
         except Exception as e_main:
             st.warning(f"Erro crítico ao processar datas para '{nome_arquivo}'. Erro: {e_main}")
             todos_os_eventos_formatados.append({
                 "Arquivo Fonte": nome_arquivo, "Evento": f"Falha na extração: {e_main}", 
-                "Data Informada": "Erro", "Data Objeto": None, "Trecho Relevante": None})
+                "Data Informada": "Erro", "Data Objeto": None, "Trecho Relevante": None
+            })
+            
     barra_progresso.empty()
     if not todos_os_eventos_formatados: st.info("Nenhum evento ou prazo foi extraído dos documentos.")
     else: st.success("Extração de datas e prazos concluída!")
@@ -359,123 +388,5 @@ else:
     with tab_dashboard:
         st.header("Análise Comparativa de Políticas Contratuais")
         st.markdown("Clique no botão para extrair e comparar as políticas chave dos documentos carregados.")
-        # CORREÇÃO: A verificação de vector_store_global e nomes_arquivos_global deve ser feita ANTES do botão
         if not (vector_store_global and nomes_arquivos_global):
-            st.warning("Carregue documentos ou uma coleção válida para usar o dashboard.")
-        else:
-            if st.button("🚀 Gerar Análise Comparativa de Políticas", key="btn_dashboard_tab"):
-                dados_extraidos = extrair_dados_dos_contratos(vector_store_global, nomes_arquivos_global)
-                if dados_extraidos: st.session_state.df_dashboard = pd.DataFrame(dados_extraidos)
-                else: st.session_state.df_dashboard = pd.DataFrame() # Cria um DF vazio se nada for extraído
-            
-            # Ajuste na condição de exibição do DataFrame
-            if 'df_dashboard' in st.session_state and st.session_state.df_dashboard is not None:
-                if not st.session_state.df_dashboard.empty:
-                    st.info("Tabela de políticas contratuais. Use a barra de rolagem horizontal.")
-                    st.dataframe(st.session_state.df_dashboard)
-                # Exibe mensagem se o botão foi clicado mas o DF está vazio
-                elif ("btn_dashboard_tab" in st.session_state and st.session_state.btn_dashboard_tab): 
-                    st.warning("Nenhuma política foi extraída para o dashboard.")
-            # Exibe mensagem se o botão foi clicado e a extração falhou (df_dashboard é None)
-            elif ("btn_dashboard_tab" in st.session_state and st.session_state.btn_dashboard_tab and st.session_state.df_dashboard is None) :
-                 st.warning("A extração de dados para o dashboard não retornou resultados ou falhou.")
-
-
-    with tab_resumo:
-        st.header("📜 Resumo Executivo de um Contrato")
-        if arquivos_pdf_originais_global:
-            lista_nomes_arquivos_resumo = [f.name for f in arquivos_pdf_originais_global]
-            if lista_nomes_arquivos_resumo: # Garante que a lista não está vazia
-                arquivo_selecionado_nome_resumo = st.selectbox("Escolha um contrato para resumir:", options=lista_nomes_arquivos_resumo, key="select_resumo_tab")
-                if st.button("✍️ Gerar Resumo Executivo", key="btn_resumo_tab"):
-                    arquivo_obj_selecionado = next((arq for arq in arquivos_pdf_originais_global if arq.name == arquivo_selecionado_nome_resumo), None)
-                    if arquivo_obj_selecionado:
-                        resumo = gerar_resumo_executivo(arquivo_obj_selecionado.getvalue(), arquivo_obj_selecionado.name)
-                        st.session_state.resumo_gerado = resumo; st.session_state.arquivo_resumido = arquivo_selecionado_nome_resumo
-                    else: st.error("Arquivo selecionado não encontrado.")
-                if st.session_state.get("arquivo_resumido") == arquivo_selecionado_nome_resumo and st.session_state.resumo_gerado:
-                    st.subheader(f"Resumo do Contrato: {st.session_state.arquivo_resumido}"); st.markdown(st.session_state.resumo_gerado)
-            else:
-                st.info("Nenhum arquivo carregado disponível para resumo.")
-        elif nomes_arquivos_global: st.info("A função de resumo funciona melhor com arquivos recém-carregados.")
-        else: st.warning("Carregue documentos para usar a função de resumo.")
-
-    with tab_riscos:
-        st.header("🚩 Análise de Cláusulas de Risco")
-        st.markdown("Analisa os documentos carregados na sessão atual em busca de cláusulas potencialmente arriscadas.")
-        if arquivos_pdf_originais_global:
-            if st.button("🔎 Analisar Riscos em Todos os Documentos Carregados", key="btn_analise_riscos"):
-                st.session_state.analise_riscos_resultados = {}
-                textos_completos_docs = []
-                for arquivo_pdf_obj in arquivos_pdf_originais_global:
-                    with open(arquivo_pdf_obj.name, "wb") as f: f.write(arquivo_pdf_obj.getbuffer())
-                    loader = PyPDFLoader(arquivo_pdf_obj.name)
-                    texto_doc = "\n\n".join([page.page_content for page in loader.load()])
-                    textos_completos_docs.append({"nome": arquivo_pdf_obj.name, "texto": texto_doc})
-                    os.remove(arquivo_pdf_obj.name)
-                resultados_analise = {}
-                for doc_info in textos_completos_docs:
-                    st.info(f"Analisando riscos em: {doc_info['nome']}...")
-                    resultado_risco = analisar_documento_para_riscos(doc_info["texto"], doc_info["nome"])
-                    resultados_analise[doc_info["nome"]] = resultado_risco
-                st.session_state.analise_riscos_resultados = resultados_analise
-            if st.session_state.analise_riscos_resultados:
-                st.markdown("---")
-                for nome_arquivo, analise in st.session_state.analise_riscos_resultados.items():
-                    with st.expander(f"Riscos Identificados em: {nome_arquivo}", expanded=True): st.markdown(analise)
-        elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: st.warning("A Análise de Riscos detalhada funciona melhor com arquivos recém-carregados.")
-        else: st.info("Faça o upload de documentos para ativar a análise de riscos.")
-
-    with tab_prazos:
-        st.header("🗓️ Monitoramento de Prazos e Vencimentos")
-        st.markdown("Extrai e organiza datas e prazos importantes dos documentos carregados na sessão atual.")
-        if arquivos_pdf_originais_global:
-            if st.button("🔍 Analisar Prazos e Datas Importantes", key="btn_analise_prazos"):
-                textos_completos_para_datas = []
-                for arquivo_pdf_obj in arquivos_pdf_originais_global:
-                    with open(arquivo_pdf_obj.name, "wb") as f: f.write(arquivo_pdf_obj.getbuffer())
-                    loader = PyPDFLoader(arquivo_pdf_obj.name)
-                    texto_doc = "\n\n".join([page.page_content for page in loader.load()])
-                    textos_completos_para_datas.append({"nome": arquivo_pdf_obj.name, "texto": texto_doc})
-                    os.remove(arquivo_pdf_obj.name)
-                eventos_extraidos = extrair_eventos_dos_contratos(textos_completos_para_datas)
-                if eventos_extraidos:
-                    df_eventos = pd.DataFrame(eventos_extraidos)
-                    df_eventos['Data Objeto'] = pd.to_datetime(df_eventos['Data Objeto'], errors='coerce')
-                    st.session_state.eventos_contratuais_df = df_eventos.sort_values(by="Data Objeto", ascending=True, na_position='last')
-                else:
-                    st.session_state.eventos_contratuais_df = pd.DataFrame()
-            
-            if 'eventos_contratuais_df' in st.session_state and st.session_state.eventos_contratuais_df is not None:
-                df_display = st.session_state.eventos_contratuais_df.copy()
-                if not df_display.empty:
-                    if 'Data Objeto' in df_display.columns and df_display['Data Objeto'].notna().any():
-                         df_display['Data Formatada'] = df_display['Data Objeto'].dt.strftime('%d/%m/%Y').fillna('N/A')
-                    else:
-                        df_display['Data Formatada'] = df_display.get('Data Informada', pd.Series(['N/A'] * len(df_display)))
-                    st.subheader("Todos os Eventos e Prazos Identificados")
-                    colunas_para_exibir_eventos = ['Arquivo Fonte', 'Evento', 'Data Informada', 'Data Formatada', 'Trecho Relevante']
-                    colunas_existentes_eventos = [col for col in colunas_para_exibir_eventos if col in df_display.columns]
-                    st.dataframe(df_display[colunas_existentes_eventos], height=400)
-
-                    if 'Data Objeto' in df_display.columns and df_display['Data Objeto'].notna().any():
-                        st.subheader("Próximos Eventos (Próximos 90 dias)")
-                        hoje_datetime = datetime.now()
-                        df_display_com_datetime = df_display[df_display['Data Objeto'].notna()].copy()
-                        if not df_display_com_datetime.empty:
-                            proximos_eventos = df_display_com_datetime[
-                                (df_display_com_datetime['Data Objeto'] >= hoje_datetime) &
-                                (df_display_com_datetime['Data Objeto'] <= (hoje_datetime + pd.Timedelta(days=90)))
-                            ]
-                            if not proximos_eventos.empty:
-                                st.table(proximos_eventos[['Arquivo Fonte', 'Evento', 'Data Formatada']])
-                            else: st.info("Nenhum evento encontrado para os próximos 90 dias.")
-                        else: st.info("Nenhuma data válida encontrada para filtrar próximos eventos.")
-                    else: st.warning("Coluna 'Data Objeto' não contém datas válidas para filtrar próximos eventos.")
-                else: st.info("Nenhum evento ou prazo foi extraído dos documentos ou a extração falhou.")
-            elif "btn_analise_prazos" in st.session_state and st.session_state.btn_analise_prazos: # Se o botão foi clicado mas o df é None
-                 st.warning("A extração de datas não retornou resultados. Verifique os avisos na função de extração.")
-        elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa:
-            st.warning("O Monitoramento de Prazos funciona melhor com arquivos recém-carregados.")
-        else:
-            st.info("Faça o upload de documentos para ativar o monitoramento de prazos.")
+            st.warning("
