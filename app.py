@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from typing import Optional, List
 import re
-from datetime import datetime, date
+from datetime import datetime, date 
 import json
 from pathlib import Path
 
@@ -15,14 +15,14 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA, LLMChain
 from langchain.prompts import PromptTemplate
-from langchain.output_parsers import PydanticOutputParser, RetryWithErrorOutputParser
+from langchain.output_parsers import PydanticOutputParser, RetryWithErrorOutputParser 
 
 # --- DEFINIÇÕES GLOBAIS ---
 COLECOES_DIR = Path("colecoes_ia")
 COLECOES_DIR.mkdir(exist_ok=True)
 
 # --- SCHEMAS DE DADOS ---
-class InfoContrato(BaseModel):
+class InfoContrato(BaseModel): 
     arquivo_fonte: str = Field(description="O nome do arquivo de origem do contrato.")
     nome_banco: Optional[str] = Field(default="Não encontrado", description="O nome do banco ou instituição financeira emissora do cartão.")
     condicao_limite_credito: Optional[str] = Field(default="Não encontrado", description="Resumo da política de como o limite de crédito é definido, analisado e alterado.")
@@ -30,12 +30,15 @@ class InfoContrato(BaseModel):
     condicao_anuidade: Optional[str] = Field(default="Não encontrado", description="Resumo da política de cobrança da anuidade, se é diferenciada ou básica e como é cobrada.")
     condicao_cancelamento: Optional[str] = Field(default="Não encontrado", description="Resumo das condições sob as quais o contrato pode ser rescindido ou cancelado pelo banco ou pelo cliente.")
 
+# MUDANÇA 1: Flexibilizando o campo de data no Schema Pydantic
 class EventoContratual(BaseModel):
+    """Modelo para extrair um evento ou prazo datado de um contrato."""
     descricao_evento: str = Field(description="Uma descrição clara e concisa do evento ou prazo. Ex: 'Vencimento do contrato', 'Data de assinatura', 'Prazo para pagamento da fatura'.")
-    data_evento_str: str = Field(description="A data do evento no formato YYYY-MM-DD. Se for um período, use a data final do período ou a data de referência mais clara.")
+    data_evento_str: Optional[str] = Field(default="Não especificado", description="A data do evento no formato YYYY-MM-DD. Se for um prazo condicional ou não específico, indique como 'Condicional' ou 'Vide Fatura'.")
     trecho_relevante: Optional[str] = Field(default=None, description="O trecho exato do contrato que menciona este evento/data.")
 
 class ListaDeEventos(BaseModel):
+    """Uma lista de todos os eventos e datas importantes encontrados em um contrato."""
     eventos: List[EventoContratual] = Field(description="Lista de eventos contratuais com suas datas.")
     arquivo_fonte: str = Field(description="O nome do arquivo de origem do contrato de onde estes eventos foram extraídos.")
 
@@ -78,7 +81,7 @@ def carregar_colecao(nome_colecao, _embeddings_obj):
 # --- FUNÇÕES DE PROCESSAMENTO DE DOCUMENTOS ---
 @st.cache_resource(show_spinner="Analisando documentos para busca e chat...")
 def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
-    if not lista_arquivos_pdf_upload or not google_api_key or not _embeddings_obj : return None, None # Adicionada verificação de embeddings_obj
+    if not lista_arquivos_pdf_upload or not google_api_key or not _embeddings_obj : return None, None
     documentos_totais = [];
     for arquivo_pdf in lista_arquivos_pdf_upload:
         temp_file_path = Path(arquivo_pdf.name)
@@ -91,11 +94,10 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
     vector_store = FAISS.from_documents(docs_fragmentados, _embeddings_obj)
     return vector_store, [f.name for f in lista_arquivos_pdf_upload]
 
-@st.cache_data(show_spinner="Extraindo políticas dos contratos...")
+@st.cache_data(show_spinner="Extraindo políticas para o dashboard...")
 def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> list:
     if not _vector_store or not google_api_key or not _nomes_arquivos: return []
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
-    # ... (resto da função como antes) ...
     prompt_template = PromptTemplate.from_template(
         "Do texto abaixo, resuma em uma ou duas frases a resposta para a seguinte pergunta: '{info_desejada}'.\n"
         "Se a informação não estiver no texto, responda com 'Não encontrado'.\n"
@@ -166,16 +168,18 @@ def analisar_documento_para_riscos(texto_completo_doc, nome_arquivo_doc):
     try: resultado = chain_riscos.invoke({"nome_arquivo": nome_arquivo_doc, "texto_contrato": texto_completo_doc}); return resultado['text']
     except Exception as e: return f"Erro ao analisar riscos para '{nome_arquivo_doc}': {e}"
 
+# MUDANÇA 2: Ajuste na função de extração de eventos e no prompt
 @st.cache_data(show_spinner="Extraindo datas e prazos dos contratos...")
 def extrair_eventos_dos_contratos(textos_completos_docs: List[dict]) -> List[dict]:
     if not textos_completos_docs or not google_api_key: return []
-    llm_eventos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
+    
+    llm_eventos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0, request_timeout=120) # Aumentando timeout
     parser = PydanticOutputParser(pydantic_object=ListaDeEventos)
-    prompt_eventos = PromptTemplate(
-        template="""Analise o texto do contrato abaixo. Sua tarefa é identificar TODOS os eventos, datas, prazos e períodos importantes mencionados.
+    
+    prompt_eventos_template_str = """Analise o texto do contrato abaixo. Sua tarefa é identificar TODOS os eventos, datas, prazos e períodos importantes mencionados.
 Para cada evento encontrado, extraia as seguintes informações:
-1.  'descricao_evento': Uma descrição clara e concisa do evento (ex: 'Data de assinatura do contrato', 'Vencimento da primeira parcela', 'Prazo final para entrega do produto', 'Início da vigência').
-2.  'data_evento_str': A data do evento no formato YYYY-MM-DD. Se for um período (ex: 'válido por 30 dias a partir de X'), use a data final do período ou a data de referência mais clara. Se for um prazo (ex: 'em até 10 dias após Y'), calcule e forneça a data final se possível, ou a data de referência e o prazo.
+1.  'descricao_evento': Uma descrição clara e concisa do evento (ex: 'Data de assinatura do contrato', 'Vencimento da primeira parcela', 'Prazo final para entrega do produto', 'Início da vigência', 'Período de carência para alteração de vencimento').
+2.  'data_evento_str': A data específica do evento no formato YYYY-MM-DD. Se uma data EXATA não puder ser determinada a partir do texto (ex: '10 dias antes do vencimento', 'prazo indeterminado', 'na fatura mensal'), preencha este campo com a string 'Não especificado' ou 'Condicional'. NÃO deixe este campo NULO ou VAZIO.
 3.  'trecho_relevante': O trecho curto e exato do contrato que menciona este evento/data.
 
 {format_instructions}
@@ -183,40 +187,78 @@ Para cada evento encontrado, extraia as seguintes informações:
 TEXTO DO CONTRATO ({arquivo_fonte}):
 {texto_contrato}
 
-LISTA DE EVENTOS ENCONTRADOS:""",
+ATENÇÃO: Certifique-se de que o campo 'data_evento_str' sempre contenha um valor textual, mesmo que seja 'Não especificado' ou 'Condicional'.
+LISTA DE EVENTOS ENCONTRADOS:
+"""
+    
+    prompt_eventos = PromptTemplate(
+        template=prompt_eventos_template_str,
         input_variables=["texto_contrato", "arquivo_fonte"],
         partial_variables={"format_instructions": parser.get_format_instructions().replace("```json", "").replace("```", "").strip()}
     )
+    
     chain_eventos = prompt_eventos | llm_eventos | parser
+    
     todos_os_eventos_formatados = []
     barra_progresso = st.progress(0, text="Iniciando extração de datas...")
+
     for i, doc_info in enumerate(textos_completos_docs):
-        nome_arquivo, texto_contrato = doc_info["nome"], doc_info["texto"]
+        nome_arquivo = doc_info["nome"]
+        texto_contrato = doc_info["texto"]
         barra_progresso.progress((i + 1) / len(textos_completos_docs), text=f"Analisando datas em: {nome_arquivo}")
         try:
+            # O RetryWithErrorOutputParser pode ser muito útil aqui se o modelo não for consistente
             retry_parser = RetryWithErrorOutputParser.from_llm(parser=parser, llm=ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1))
-            resultado_parseado = chain_eventos.invoke({"texto_contrato": texto_contrato, "arquivo_fonte": nome_arquivo})
+            
+            # Tentativa com o parser normal primeiro
+            try:
+                resultado_parseado = chain_eventos.invoke({
+                    "texto_contrato": texto_contrato,
+                    "arquivo_fonte": nome_arquivo
+                })
+            except Exception as e_parse_initial: # Se o parser direto falhar, tenta o retry_parser
+                st.write(f"Parser inicial falhou para {nome_arquivo}, tentando com retry parser. Erro: {e_parse_initial}")
+                resultado_parseado = retry_parser.parse_with_prompt(
+                    llm_eventos.invoke(prompt_eventos.format_prompt(texto_contrato=texto_contrato, arquivo_fonte=nome_arquivo)).content, 
+                    prompt_eventos.format_prompt(texto_contrato=texto_contrato, arquivo_fonte=nome_arquivo)
+                )
+
+
             if resultado_parseado and isinstance(resultado_parseado, ListaDeEventos):
                 for evento in resultado_parseado.eventos:
                     data_obj = None
-                    try: data_obj = datetime.strptime(evento.data_evento_str, "%Y-%m-%d").date()
-                    except ValueError:
-                        try: data_obj = datetime.strptime(evento.data_evento_str, "%d/%m/%Y").date()
-                        except ValueError: pass
+                    # O campo data_evento_str agora pode ser "Não especificado" ou "Condicional"
+                    if evento.data_evento_str and evento.data_evento_str.lower() not in ["não especificado", "condicional", "vide fatura", "n/a", ""]:
+                        try:
+                            data_obj = datetime.strptime(evento.data_evento_str, "%Y-%m-%d").date()
+                        except ValueError:
+                            try:
+                                data_obj = datetime.strptime(evento.data_evento_str, "%d/%m/%Y").date()
+                            except ValueError:
+                                pass # Mantém data_obj como None se não conseguir parsear
+                    
                     todos_os_eventos_formatados.append({
-                        "Arquivo Fonte": nome_arquivo, "Evento": evento.descricao_evento,
-                        "Data String": evento.data_evento_str, "Data Objeto": data_obj,
-                        "Trecho Relevante": evento.trecho_relevante})
-        except Exception as e:
-            st.warning(f"Não foi possível extrair datas formatadas de '{nome_arquivo}'. Erro: {e}.")
+                        "Arquivo Fonte": nome_arquivo,
+                        "Evento": evento.descricao_evento,
+                        "Data Informada": evento.data_evento_str, # Mantemos a string original
+                        "Data Objeto": data_obj, 
+                        "Trecho Relevante": evento.trecho_relevante
+                    })
+        except Exception as e_main:
+            st.warning(f"Erro significativo ao processar datas para '{nome_arquivo}'. Erro: {e_main}")
             todos_os_eventos_formatados.append({
-                "Arquivo Fonte": nome_arquivo, "Evento": "Falha na extração de datas", 
-                "Data String": None, "Data Objeto": None, "Trecho Relevante": str(e)})
-    barra_progresso.empty(); st.success("Extração de datas e prazos concluída!")
+                "Arquivo Fonte": nome_arquivo, "Evento": f"Falha na extração: {e_main}", 
+                "Data Informada": "Erro", "Data Objeto": None, "Trecho Relevante": None
+            })
+            
+    barra_progresso.empty()
+    if not todos_os_eventos_formatados:
+        st.info("Nenhum evento ou prazo foi extraído dos documentos.")
+    else:
+        st.success("Extração de datas e prazos concluída!")
     return todos_os_eventos_formatados
 
 def formatar_chat_para_markdown(mensagens_chat):
-    # (sem alterações)
     texto_formatado = "# Histórico da Conversa com Analisador-IA\n\n"
     for mensagem in mensagens_chat:
         if mensagem["role"] == "user": texto_formatado += f"## Você:\n{mensagem['content']}\n\n"
@@ -239,13 +281,12 @@ if google_api_key:
     embeddings_global = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 else:
     embeddings_global = None
-    # Removido o st.error daqui para não aparecer toda hora, a chave é checada antes das operações
 
-# --- LAYOUT PRINCIPAL ---
+# --- LAYOUT PRINCIPAL E SIDEBAR ---
 st.title("🛡️ Analisador-IA Pro")
 st.sidebar.header("Gerenciar Documentos")
 modo_documento = st.sidebar.radio("Como carregar os documentos?", ("Fazer novo upload de PDFs", "Carregar coleção existente"), key="modo_doc_radio")
-arquivos_pdf_upload_sidebar = None # Definido aqui para ter escopo mais amplo
+arquivos_pdf_upload_sidebar = None
 if modo_documento == "Fazer novo upload de PDFs":
     arquivos_pdf_upload_sidebar = st.sidebar.file_uploader("Selecione um ou mais contratos em PDF", type="pdf", accept_multiple_files=True, key="uploader_sidebar")
     if arquivos_pdf_upload_sidebar:
@@ -257,7 +298,7 @@ if modo_documento == "Fazer novo upload de PDFs":
                 st.session_state.pop('df_dashboard', None); st.session_state.pop('resumo_gerado', None)
                 st.session_state.pop('analise_riscos_resultados', None); st.session_state.pop('eventos_contratuais_df', None)
                 st.rerun()
-            else: st.sidebar.error("Chave de API do Google não configurada. Verifique as configurações.")
+            else: st.sidebar.error("Chave de API ou Embeddings não configurados.")
 elif modo_documento == "Carregar coleção existente":
     colecoes_disponiveis = listar_colecoes_salvas()
     if colecoes_disponiveis:
@@ -271,10 +312,10 @@ elif modo_documento == "Carregar coleção existente":
                     st.session_state.pop('df_dashboard', None); st.session_state.pop('resumo_gerado', None)
                     st.session_state.pop('analise_riscos_resultados', None); st.session_state.pop('eventos_contratuais_df', None)
                     st.rerun()
-            else: st.sidebar.error("Chave de API do Google não configurada. Verifique as configurações.")
+            else: st.sidebar.error("Chave de API ou Embeddings não configurados.")
     else: st.sidebar.info("Nenhuma coleção salva ainda.")
 
-if "vector_store" in st.session_state and st.session_state.vector_store is not None and st.session_state.get("arquivos_pdf_originais"): # Só permite salvar se veio de um upload novo e os objetos de arquivo estão disponíveis
+if "vector_store" in st.session_state and st.session_state.vector_store is not None and st.session_state.get("arquivos_pdf_originais"):
     st.sidebar.markdown("---"); st.sidebar.subheader("Salvar Coleção Atual")
     nome_nova_colecao = st.sidebar.text_input("Nome para a nova coleção:", key="input_nome_colecao_sidebar")
     if st.sidebar.button("Salvar Coleção", key="btn_save_colecao_sidebar"):
@@ -290,15 +331,13 @@ st.sidebar.header("Configurações de Idioma"); idioma_selecionado = st.sidebar.
 if "messages" not in st.session_state: st.session_state.messages = []
 if "resumo_gerado" not in st.session_state: st.session_state.resumo_gerado = ""
 if "arquivo_resumido" not in st.session_state: st.session_state.arquivo_resumido = None
-if "df_dashboard" not in st.session_state: st.session_state.df_dashboard = None # Inicializado como None
+if "df_dashboard" not in st.session_state: st.session_state.df_dashboard = None
 if "analise_riscos_resultados" not in st.session_state: st.session_state.analise_riscos_resultados = {}
-if "eventos_contratuais_df" not in st.session_state: st.session_state.eventos_contratuais_df = None # Inicializado como None
+if "eventos_contratuais_df" not in st.session_state: st.session_state.eventos_contratuais_df = None
 
 # --- LÓGICA DAS ABAS ---
 tab_chat, tab_dashboard, tab_resumo, tab_riscos, tab_prazos = st.tabs(["💬 Chat", "📈 Dashboard", "📜 Resumo", "🚩 Riscos", "🗓️ Prazos"])
-
-# Condição principal para habilitar as abas
-documentos_prontos = google_api_key and (st.session_state.get("vector_store") or st.session_state.get("arquivos_pdf_originais"))
+documentos_prontos = google_api_key and embeddings_global and (st.session_state.get("vector_store") or st.session_state.get("arquivos_pdf_originais"))
 
 if documentos_prontos:
     vector_store_global = st.session_state.get("vector_store")
@@ -307,18 +346,16 @@ if documentos_prontos:
 
     with tab_chat: # (Lógica do Chat como antes)
         st.header("Converse com seus documentos")
-        if not vector_store_global: st.warning("O motor de busca não está pronto.")
-        else: # ... (código do chat completo como na última versão) ...
+        if not vector_store_global: st.warning("O motor de busca de documentos não está pronto.")
+        else: # ... (código completo do chat)
             template_prompt_chat = PromptTemplate.from_template(
                 """Use os seguintes trechos de contexto para responder à pergunta no final.
-                INSTRUÇÕES DE FORMATAÇÃO DA RESPOSTA:
-                Sua resposta final deve ter duas partes, separadas por '|||'.
+                INSTRUÇÕES DE FORMATAÇÃO DA RESPOSTA: Sua resposta final deve ter duas partes, separadas por '|||'.
                 1. Parte 1: A resposta completa e detalhada para a pergunta do usuário, no idioma {language}.
                 2. Parte 2: A citação exata e literal da sentença do contexto que foi mais importante para formular a resposta.
                 CONTEXTO: {context}
                 PERGUNTA: {question}
-                RESPOSTA (seguindo o formato acima):"""
-            )
+                RESPOSTA (seguindo o formato acima):""")
             if not st.session_state.messages : st.session_state.messages.append({"role": "assistant", "content": f"Olá! Documentos da coleção '{st.session_state.get('colecao_ativa', 'atual')}' prontos. Qual sua pergunta?"})
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
@@ -342,12 +379,7 @@ if documentos_prontos:
                 with st.chat_message("assistant"):
                     with st.spinner("Pesquisando..."):
                         llm_chat = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
-                        qa_chain = RetrievalQA.from_chain_type(
-                            llm=llm_chat, chain_type="stuff",
-                            retriever=vector_store_global.as_retriever(search_kwargs={"k": 5}),
-                            return_source_documents=True,
-                            chain_type_kwargs={"prompt": template_prompt_chat.partial(language=idioma_selecionado)}
-                        )
+                        qa_chain = RetrievalQA.from_chain_type(llm=llm_chat, chain_type="stuff", retriever=vector_store_global.as_retriever(search_kwargs={"k": 5}), return_source_documents=True, chain_type_kwargs={"prompt": template_prompt_chat.partial(language=idioma_selecionado)})
                         resultado = qa_chain({"query": prompt}); resposta_bruta = resultado["result"]; fontes = resultado["source_documents"]
                         try: resposta_principal, sentenca_chave = resposta_bruta.split('|||'); sentenca_chave = sentenca_chave.strip()
                         except ValueError: resposta_principal, sentenca_chave = resposta_bruta, None
@@ -362,20 +394,20 @@ if documentos_prontos:
             if st.button("🚀 Gerar Análise Comparativa de Políticas", key="btn_dashboard_tab"):
                 dados_extraidos = extrair_dados_dos_contratos(vector_store_global, nomes_arquivos_global)
                 if dados_extraidos: st.session_state.df_dashboard = pd.DataFrame(dados_extraidos)
-            
-            # MUDANÇA AQUI para verificar a existência da chave antes de acessar
+                else: st.session_state.df_dashboard = pd.DataFrame() # Cria um DF vazio se nada for extraído
             if 'df_dashboard' in st.session_state and st.session_state.df_dashboard is not None:
-                st.info("Tabela de políticas contratuais. Use a barra de rolagem horizontal.")
-                st.dataframe(st.session_state.df_dashboard)
-                # (Lógica de estatísticas e gráficos pode ser adicionada aqui, com as devidas verificações de coluna)
-            elif st.session_state.get('df_dashboard') is None and "btn_dashboard_tab" in st.session_state and st.session_state.btn_dashboard_tab:
-                 st.warning("A extração de dados para o dashboard não retornou resultados ou falhou. Verifique os logs ou tente novamente.")
+                if not st.session_state.df_dashboard.empty:
+                    st.info("Tabela de políticas contratuais. Use a barra de rolagem horizontal.")
+                    st.dataframe(st.session_state.df_dashboard)
+                else:
+                    st.warning("Nenhuma política foi extraída para o dashboard. Verifique se os documentos contêm as informações buscadas ou tente refinar os prompts.")
+            elif "btn_dashboard_tab" in st.session_state and st.session_state.btn_dashboard_tab :
+                 st.warning("A extração de dados para o dashboard não retornou resultados ou falhou.")
         else: st.warning("Carregue documentos ou uma coleção para usar o dashboard.")
 
-    with tab_resumo: # (Lógica do Resumo como antes)
+    with tab_resumo:
         st.header("📜 Resumo Executivo de um Contrato")
         if arquivos_pdf_originais_global:
-            # ... (código do resumo como antes) ...
             lista_nomes_arquivos_resumo = [f.name for f in arquivos_pdf_originais_global]
             arquivo_selecionado_nome_resumo = st.selectbox("Escolha um contrato para resumir:", options=lista_nomes_arquivos_resumo, key="select_resumo_tab")
             if st.button("✍️ Gerar Resumo Executivo", key="btn_resumo_tab"):
@@ -389,11 +421,10 @@ if documentos_prontos:
         elif nomes_arquivos_global: st.info("A função de resumo funciona melhor com arquivos recém-carregados.")
         else: st.warning("Carregue documentos para usar a função de resumo.")
 
-    with tab_riscos: # (Lógica de Análise de Riscos como antes)
+    with tab_riscos:
         st.header("🚩 Análise de Cláusulas de Risco")
         st.markdown("Analisa os documentos carregados na sessão atual em busca de cláusulas potencialmente arriscadas.")
         if arquivos_pdf_originais_global:
-            # ... (código da análise de riscos como antes) ...
             if st.button("🔎 Analisar Riscos em Todos os Documentos Carregados", key="btn_analise_riscos"):
                 st.session_state.analise_riscos_resultados = {}
                 textos_completos_docs = []
@@ -432,39 +463,37 @@ if documentos_prontos:
                 if eventos_extraidos:
                     df_eventos = pd.DataFrame(eventos_extraidos)
                     df_eventos['Data Objeto'] = pd.to_datetime(df_eventos['Data Objeto'], errors='coerce')
-                    st.session_state.eventos_contratuais_df = df_eventos.sort_values(by="Data Objeto", ascending=True)
-                else: st.session_state.eventos_contratuais_df = pd.DataFrame()
+                    st.session_state.eventos_contratuais_df = df_eventos.sort_values(by="Data Objeto", ascending=True, na_position='last')
+                else:
+                    st.session_state.eventos_contratuais_df = pd.DataFrame()
             
-            # MUDANÇA AQUI para verificar a existência da chave antes de acessar
             if 'eventos_contratuais_df' in st.session_state and st.session_state.eventos_contratuais_df is not None:
                 df_display = st.session_state.eventos_contratuais_df.copy()
-                if 'Data Objeto' in df_display.columns:
-                    df_display['Data Formatada'] = df_display['Data Objeto'].apply(lambda x: x.strftime('%d/%m/%Y') if pd.notnull(x) else 'N/A')
-                else: # Caso a coluna Data Objeto não exista por falha na extração completa
-                    df_display['Data Formatada'] = 'N/A'
+                if not df_display.empty:
+                    if 'Data Objeto' in df_display.columns:
+                        df_display['Data Formatada'] = df_display['Data Objeto'].apply(lambda x: x.strftime('%d/%m/%Y') if pd.notnull(x) else 'N/A')
+                    else: df_display['Data Formatada'] = 'N/A'
+                    st.subheader("Todos os Eventos e Prazos Identificados")
+                    colunas_para_exibir_eventos = ['Arquivo Fonte', 'Evento', 'Data Informada', 'Data Formatada', 'Trecho Relevante']
+                    colunas_existentes_eventos = [col for col in colunas_para_exibir_eventos if col in df_display.columns]
+                    st.dataframe(df_display[colunas_existentes_eventos], height=400)
 
-                st.subheader("Todos os Eventos e Prazos Identificados")
-                colunas_para_exibir_eventos = ['Arquivo Fonte', 'Evento', 'Data Formatada', 'Trecho Relevante']
-                colunas_existentes_eventos = [col for col in colunas_para_exibir_eventos if col in df_display.columns]
-                st.dataframe(df_display[colunas_existentes_eventos], height=400)
-
-                if 'Data Objeto' in df_display.columns:
-                    st.subheader("Próximos Eventos (Próximos 90 dias)")
-                    hoje = datetime.now().date()
-                    proximos_eventos = df_display[
-                        (df_display['Data Objeto'].notna()) &
-                        (df_display['Data Objeto'] >= hoje) &
-                        (df_display['Data Objeto'] <= (hoje + pd.Timedelta(days=90)))
-                    ]
-                    if not proximos_eventos.empty:
-                        st.table(proximos_eventos[['Arquivo Fonte', 'Evento', 'Data Formatada']])
-                    else: st.info("Nenhum evento encontrado para os próximos 90 dias.")
+                    if 'Data Objeto' in df_display.columns:
+                        st.subheader("Próximos Eventos (Próximos 90 dias)")
+                        hoje = date.today() # Usar date.today() para comparação correta
+                        proximos_eventos = df_display[
+                            (df_display['Data Objeto'].notna()) &
+                            (df_display['Data Objeto'] >= hoje) & # Comparar date com date
+                            (df_display['Data Objeto'] <= (hoje + pd.Timedelta(days=90)))
+                        ]
+                        if not proximos_eventos.empty:
+                            st.table(proximos_eventos[['Arquivo Fonte', 'Evento', 'Data Formatada']])
+                        else: st.info("Nenhum evento encontrado para os próximos 90 dias.")
+                    else: st.warning("Coluna 'Data Objeto' não encontrada para filtrar próximos eventos.")
                 else:
-                    st.warning("Não foi possível filtrar próximos eventos pois a coluna de datas não foi gerada corretamente.")
-            elif st.session_state.get('eventos_contratuais_df') is None and "btn_analise_prazos" in st.session_state and st.session_state.btn_analise_prazos:
-                st.warning("A extração de datas não retornou resultados ou falhou.")
-
-
+                    st.info("Nenhum evento ou prazo foi extraído dos documentos ou a extração falhou.")
+            elif "btn_analise_prazos" in st.session_state and st.session_state.btn_analise_prazos:
+                 st.warning("A extração de datas não retornou resultados ou falhou. Verifique os avisos acima.")
         elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa:
             st.warning("O Monitoramento de Prazos funciona melhor com arquivos recém-carregados.")
         else:
