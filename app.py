@@ -3,6 +3,7 @@ import os
 import pandas as pd
 from typing import Optional
 import re
+from datetime import datetime # Import para o nome do arquivo de exportação
 
 # Importações do LangChain e Pydantic
 from pydantic import BaseModel, Field
@@ -41,7 +42,6 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 @st.cache_resource(show_spinner="Analisando documentos...")
 def obter_vector_store(lista_arquivos_pdf):
-    # (sem alterações)
     if not lista_arquivos_pdf or not google_api_key: return None
     documentos_totais = []
     for arquivo_pdf in lista_arquivos_pdf:
@@ -59,7 +59,7 @@ def obter_vector_store(lista_arquivos_pdf):
 
 @st.cache_data(show_spinner="Extraindo políticas dos contratos...")
 def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> list:
-    # (sem alterações)
+    # (sem alterações nesta função)
     if not _vector_store or not google_api_key: return []
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
     prompt_template = PromptTemplate.from_template(
@@ -96,28 +96,17 @@ def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> 
     st.success("Análise de todos os documentos concluída!")
     return resultados_finais
 
-# --- NOVA FUNÇÃO PARA GERAR RESUMO EXECUTIVO ---
 @st.cache_data(show_spinner="Gerando resumo executivo...")
 def gerar_resumo_executivo(arquivo_pdf_selecionado_bytes, nome_arquivo, google_api_key_func):
+    # (sem alterações nesta função)
     if not arquivo_pdf_selecionado_bytes or not google_api_key_func:
         return "Erro: Arquivo ou chave de API não fornecidos."
-
-    # Salva temporariamente para o loader
-    with open(nome_arquivo, "wb") as f:
-        f.write(arquivo_pdf_selecionado_bytes)
-    
+    with open(nome_arquivo, "wb") as f: f.write(arquivo_pdf_selecionado_bytes)
     loader = PyPDFLoader(nome_arquivo)
     documento_completo_paginas = loader.load()
-    os.remove(nome_arquivo) # Limpa o arquivo temporário
-
-    # Junta o texto de todas as páginas (ou de um número limitado para não estourar o limite de tokens)
-    # Para contratos muito grandes, pode ser necessário sumarizar por partes ou usar modelos com contexto maior.
-    # Aqui, vamos pegar as primeiras 20 páginas como exemplo, mas o ideal é processar o documento todo
-    # se o modelo permitir. gemini-1.5-flash tem um contexto grande.
+    os.remove(nome_arquivo)
     texto_completo = "\n\n".join([page.page_content for page in documento_completo_paginas])
-
     llm_resumo = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3)
-    
     template_prompt_resumo = PromptTemplate.from_template(
         "Você é um assistente especializado em analisar e resumir documentos jurídicos, como contratos.\n"
         "Com base no texto do contrato fornecido abaixo, crie um resumo executivo em 5 a 7 tópicos concisos (bullet points).\n"
@@ -129,12 +118,39 @@ def gerar_resumo_executivo(arquivo_pdf_selecionado_bytes, nome_arquivo, google_a
         "RESUMO EXECUTIVO:"
     )
     chain_resumo = LLMChain(llm=llm_resumo, prompt=template_prompt_resumo)
-    
     try:
         resultado = chain_resumo.invoke({"texto_contrato": texto_completo})
         return resultado['text']
     except Exception as e:
         return f"Erro ao gerar resumo: {e}"
+
+# --- NOVA FUNÇÃO PARA FORMATAR O CHAT PARA EXPORTAÇÃO ---
+def formatar_chat_para_markdown(mensagens_chat):
+    texto_formatado = "# Histórico da Conversa com Analisador-IA\n\n"
+    for mensagem in mensagens_chat:
+        if mensagem["role"] == "user":
+            texto_formatado += f"## Você:\n{mensagem['content']}\n\n"
+        elif mensagem["role"] == "assistant":
+            texto_formatado += f"## IA:\n{mensagem['content']}\n"
+            if "sources" in mensagem and mensagem["sources"]:
+                texto_formatado += "### Fontes Utilizadas:\n"
+                for i, doc in enumerate(mensagem["sources"]):
+                    texto_fonte_original = doc.page_content
+                    sentenca_chave = mensagem.get("sentenca_chave")
+                    # Prepara o texto da fonte para Markdown (escapa caracteres especiais se necessário)
+                    texto_fonte_md = texto_fonte_original.replace('\n', '  \n') # Para quebras de linha em MD
+                    
+                    if sentenca_chave and sentenca_chave in texto_fonte_original:
+                        # No Markdown, o destaque pode ser feito com ** (negrito) ou * (itálico)
+                        # Usar negrito para a sentença chave
+                        texto_formatado_fonte = texto_fonte_md.replace(sentenca_chave, f"**{sentenca_chave}**")
+                    else:
+                        texto_formatado_fonte = texto_fonte_md
+                    
+                    texto_formatado += f"- **Fonte {i+1} (Documento: `{doc.metadata.get('source', 'N/A')}`, Página: {doc.metadata.get('page', 'N/A')})**:\n"
+                    texto_formatado += f"  > {texto_formatado_fonte[:300]}...\n\n" # Usando blockquote para o trecho
+            texto_formatado += "---\n\n" # Separador entre mensagens da IA
+    return texto_formatado
 
 # --- LAYOUT PRINCIPAL ---
 st.title("⚖️ Analisador de Contratos IA")
@@ -159,10 +175,11 @@ if "arquivo_resumido" not in st.session_state:
 # --- LÓGICA DAS ABAS ---
 tab_chat, tab_dashboard, tab_resumo = st.tabs(["💬 Chat com Contratos", "📈 Dashboard Analítico", "📜 Resumo Executivo"])
 
-# --- ABA DE CHAT (COMPLETA E RESTAURADA) ---
+# --- ABA DE CHAT COM BOTÃO DE EXPORTAÇÃO ---
 with tab_chat:
-    # (Lógica do Chat permanece a mesma da versão anterior, omitida aqui para brevidade, mas está no código final que você tem)
     st.header("Converse com seus documentos")
+    
+    # Template de prompt específico para o chat com highlight
     template_prompt_chat = PromptTemplate.from_template(
         """Use os seguintes trechos de contexto para responder à pergunta no final.
         INSTRUÇÕES DE FORMATAÇÃO DA RESPOSTA:
@@ -173,11 +190,26 @@ with tab_chat:
         PERGUNTA: {question}
         RESPOSTA (seguindo o formato acima):"""
     )
+    
     if arquivos_pdf and google_api_key:
         vector_store_chat = obter_vector_store(arquivos_pdf)
+
+        # NOVA SEÇÃO: Botão de Exportação
+        if st.session_state.messages: # Mostra o botão apenas se houver mensagens
+            chat_exportado_md = formatar_chat_para_markdown(st.session_state.messages)
+            agora = datetime.now().strftime("%Y%m%d_%H%M%S")
+            st.download_button(
+                label="📥 Exportar Conversa (Markdown)",
+                data=chat_exportado_md,
+                file_name=f"conversa_contratos_{agora}.md",
+                mime="text/markdown"
+            )
+        st.markdown("---") # Linha separadora
+
         if vector_store_chat:
             if not st.session_state.messages:
-                st.session_state.messages.append({"role": "assistant", "content": "Olá! Os documentos estão prontos para consulta. Qual sua pergunta?"})
+                st.session_state.messages.append({"role": "assistant", "content": "Olá! Seus documentos foram analisados. Qual sua pergunta?"})
+
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
@@ -212,11 +244,15 @@ with tab_chat:
                             sentenca_chave = sentenca_chave.strip()
                         except ValueError:
                             resposta_principal, sentenca_chave = resposta_bruta, None
+                        
                         st.markdown(resposta_principal)
                         st.session_state.messages.append({"role": "assistant", "content": resposta_principal, "sources": fontes, "sentenca_chave": sentenca_chave})
                         st.rerun()
+        else:
+             st.warning("O motor de análise de documentos não pôde ser iniciado. Verifique o upload e a chave de API.")
     else:
         st.info("Por favor, faça o upload de um ou mais documentos e configure a chave de API na barra lateral para começar.")
+
 
 # --- ABA DE DASHBOARD (sem alterações) ---
 with tab_dashboard:
@@ -237,9 +273,9 @@ with tab_dashboard:
     else:
         st.info("Por favor, faça o upload dos documentos e configure a chave de API na barra lateral para ativar o dashboard.")
 
-
-# --- NOVA ABA DE RESUMO EXECUTIVO ---
+# --- ABA DE RESUMO EXECUTIVO (sem alterações) ---
 with tab_resumo:
+    # (Lógica do Resumo permanece a mesma da versão anterior)
     st.header("📜 Resumo Executivo de um Contrato")
     if arquivos_pdf and google_api_key:
         lista_nomes_arquivos = [f.name for f in arquivos_pdf]
@@ -248,27 +284,17 @@ with tab_resumo:
             options=lista_nomes_arquivos,
             key="select_arquivo_resumo"
         )
-
         if st.button("✍️ Gerar Resumo Executivo"):
-            arquivo_obj_selecionado = None
-            # Encontra o objeto do arquivo correspondente ao nome selecionado
-            for arq in arquivos_pdf:
-                if arq.name == arquivo_selecionado_nome:
-                    arquivo_obj_selecionado = arq
-                    break
-            
+            arquivo_obj_selecionado = next((arq for arq in arquivos_pdf if arq.name == arquivo_selecionado_nome), None)
             if arquivo_obj_selecionado:
                 resumo = gerar_resumo_executivo(arquivo_obj_selecionado.getvalue(), arquivo_obj_selecionado.name, google_api_key)
                 st.session_state.resumo_gerado = resumo
                 st.session_state.arquivo_resumido = arquivo_selecionado_nome
-            else:
-                st.error("Arquivo selecionado não encontrado. Por favor, recarregue os arquivos se necessário.")
-
+            else: st.error("Arquivo selecionado não encontrado.")
         if st.session_state.get("arquivo_resumido") == arquivo_selecionado_nome and st.session_state.resumo_gerado:
             st.subheader(f"Resumo do Contrato: {st.session_state.arquivo_resumido}")
             st.markdown(st.session_state.resumo_gerado)
-        elif not st.session_state.resumo_gerado and st.session_state.get("arquivo_resumido") == arquivo_selecionado_nome:
-            st.warning("Clique em 'Gerar Resumo Executivo' para ver o resumo deste documento.")
-
+        elif not st.session_state.resumo_gerado and st.session_state.get("arquivo_resumido") == arquivo_selecionado_nome :
+             st.warning("Clique em 'Gerar Resumo Executivo' para ver o resumo deste documento.")
     else:
         st.info("Por favor, faça o upload de um ou mais documentos e configure a chave de API na barra lateral para usar esta funcionalidade.")
