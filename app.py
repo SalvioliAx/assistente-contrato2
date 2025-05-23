@@ -389,4 +389,115 @@ else:
         st.header("Análise Comparativa de Políticas Contratuais")
         st.markdown("Clique no botão para extrair e comparar as políticas chave dos documentos carregados.")
         if not (vector_store_global and nomes_arquivos_global):
-            st.warning("
+            st.warning("Carregue documentos ou uma coleção válida para usar o dashboard.")
+        else:
+            if st.button("🚀 Gerar Análise Comparativa de Políticas", key="btn_dashboard_tab"):
+                dados_extraidos = extrair_dados_dos_contratos(vector_store_global, nomes_arquivos_global)
+                if dados_extraidos: st.session_state.df_dashboard = pd.DataFrame(dados_extraidos)
+                else: st.session_state.df_dashboard = pd.DataFrame()
+            if 'df_dashboard' in st.session_state and st.session_state.df_dashboard is not None:
+                if not st.session_state.df_dashboard.empty:
+                    st.info("Tabela de políticas contratuais. Use a barra de rolagem horizontal.")
+                    st.dataframe(st.session_state.df_dashboard)
+                elif ("btn_dashboard_tab" in st.session_state and st.session_state.btn_dashboard_tab): 
+                    st.warning("Nenhuma política foi extraída para o dashboard.")
+            elif ("btn_dashboard_tab" in st.session_state and st.session_state.btn_dashboard_tab and st.session_state.df_dashboard is None) :
+                 st.warning("A extração de dados para o dashboard não retornou resultados ou falhou.")
+
+    with tab_resumo:
+        st.header("📜 Resumo Executivo de um Contrato")
+        if arquivos_pdf_originais_global:
+            lista_nomes_arquivos_resumo = [f.name for f in arquivos_pdf_originais_global]
+            if lista_nomes_arquivos_resumo:
+                arquivo_selecionado_nome_resumo = st.selectbox("Escolha um contrato para resumir:", options=lista_nomes_arquivos_resumo, key="select_resumo_tab")
+                if st.button("✍️ Gerar Resumo Executivo", key="btn_resumo_tab"):
+                    arquivo_obj_selecionado = next((arq for arq in arquivos_pdf_originais_global if arq.name == arquivo_selecionado_nome_resumo), None)
+                    if arquivo_obj_selecionado:
+                        resumo = gerar_resumo_executivo(arquivo_obj_selecionado.getvalue(), arquivo_obj_selecionado.name)
+                        st.session_state.resumo_gerado = resumo; st.session_state.arquivo_resumido = arquivo_selecionado_nome_resumo
+                    else: st.error("Arquivo selecionado não encontrado.")
+                if st.session_state.get("arquivo_resumido") == arquivo_selecionado_nome_resumo and st.session_state.resumo_gerado:
+                    st.subheader(f"Resumo do Contrato: {st.session_state.arquivo_resumido}"); st.markdown(st.session_state.resumo_gerado)
+            else: st.info("Nenhum arquivo carregado disponível para resumo.")
+        elif nomes_arquivos_global: st.info("A função de resumo funciona melhor com arquivos recém-carregados.")
+        else: st.warning("Carregue documentos para usar a função de resumo.")
+
+    with tab_riscos:
+        st.header("🚩 Análise de Cláusulas de Risco")
+        st.markdown("Analisa os documentos carregados na sessão atual em busca de cláusulas potencialmente arriscadas.")
+        if arquivos_pdf_originais_global:
+            if st.button("🔎 Analisar Riscos em Todos os Documentos Carregados", key="btn_analise_riscos"):
+                st.session_state.analise_riscos_resultados = {}
+                textos_completos_docs = []
+                for arquivo_pdf_obj in arquivos_pdf_originais_global:
+                    with open(arquivo_pdf_obj.name, "wb") as f: f.write(arquivo_pdf_obj.getbuffer())
+                    loader = PyPDFLoader(arquivo_pdf_obj.name)
+                    texto_doc = "\n\n".join([page.page_content for page in loader.load()])
+                    textos_completos_docs.append({"nome": arquivo_pdf_obj.name, "texto": texto_doc})
+                    os.remove(arquivo_pdf_obj.name)
+                resultados_analise = {}
+                for doc_info in textos_completos_docs:
+                    st.info(f"Analisando riscos em: {doc_info['nome']}...")
+                    resultado_risco = analisar_documento_para_riscos(doc_info["texto"], doc_info["nome"])
+                    resultados_analise[doc_info["nome"]] = resultado_risco
+                st.session_state.analise_riscos_resultados = resultados_analise
+            if st.session_state.analise_riscos_resultados:
+                st.markdown("---")
+                for nome_arquivo, analise in st.session_state.analise_riscos_resultados.items():
+                    with st.expander(f"Riscos Identificados em: {nome_arquivo}", expanded=True): st.markdown(analise)
+        elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: st.warning("A Análise de Riscos detalhada funciona melhor com arquivos recém-carregados.")
+        else: st.info("Faça o upload de documentos para ativar a análise de riscos.")
+
+    with tab_prazos:
+        st.header("🗓️ Monitoramento de Prazos e Vencimentos")
+        st.markdown("Extrai e organiza datas e prazos importantes dos documentos carregados na sessão atual.")
+        if arquivos_pdf_originais_global:
+            if st.button("🔍 Analisar Prazos e Datas Importantes", key="btn_analise_prazos"):
+                textos_completos_para_datas = []
+                for arquivo_pdf_obj in arquivos_pdf_originais_global:
+                    with open(arquivo_pdf_obj.name, "wb") as f: f.write(arquivo_pdf_obj.getbuffer())
+                    loader = PyPDFLoader(arquivo_pdf_obj.name)
+                    texto_doc = "\n\n".join([page.page_content for page in loader.load()])
+                    textos_completos_para_datas.append({"nome": arquivo_pdf_obj.name, "texto": texto_doc})
+                    os.remove(arquivo_pdf_obj.name)
+                eventos_extraidos = extrair_eventos_dos_contratos(textos_completos_para_datas)
+                if eventos_extraidos:
+                    df_eventos = pd.DataFrame(eventos_extraidos)
+                    df_eventos['Data Objeto'] = pd.to_datetime(df_eventos['Data Objeto'], errors='coerce')
+                    st.session_state.eventos_contratuais_df = df_eventos.sort_values(by="Data Objeto", ascending=True, na_position='last')
+                else:
+                    st.session_state.eventos_contratuais_df = pd.DataFrame()
+            
+            if 'eventos_contratuais_df' in st.session_state and st.session_state.eventos_contratuais_df is not None:
+                df_display = st.session_state.eventos_contratuais_df.copy()
+                if not df_display.empty:
+                    if 'Data Objeto' in df_display.columns and df_display['Data Objeto'].notna().any():
+                         df_display['Data Formatada'] = df_display['Data Objeto'].dt.strftime('%d/%m/%Y').fillna('N/A')
+                    else:
+                        df_display['Data Formatada'] = df_display.get('Data Informada', pd.Series(['N/A'] * len(df_display)))
+                    st.subheader("Todos os Eventos e Prazos Identificados")
+                    colunas_para_exibir_eventos = ['Arquivo Fonte', 'Evento', 'Data Informada', 'Data Formatada', 'Trecho Relevante']
+                    colunas_existentes_eventos = [col for col in colunas_para_exibir_eventos if col in df_display.columns]
+                    st.dataframe(df_display[colunas_existentes_eventos], height=400)
+
+                    if 'Data Objeto' in df_display.columns and df_display['Data Objeto'].notna().any():
+                        st.subheader("Próximos Eventos (Próximos 90 dias)")
+                        hoje_datetime = datetime.now()
+                        df_display_com_datetime = df_display[df_display['Data Objeto'].notna()].copy()
+                        if not df_display_com_datetime.empty:
+                            proximos_eventos = df_display_com_datetime[
+                                (df_display_com_datetime['Data Objeto'] >= hoje_datetime) &
+                                (df_display_com_datetime['Data Objeto'] <= (hoje_datetime + pd.Timedelta(days=90)))
+                            ]
+                            if not proximos_eventos.empty:
+                                st.table(proximos_eventos[['Arquivo Fonte', 'Evento', 'Data Formatada']])
+                            else: st.info("Nenhum evento encontrado para os próximos 90 dias.")
+                        else: st.info("Nenhuma data válida encontrada para filtrar próximos eventos.")
+                    else: st.warning("Coluna 'Data Objeto' não contém datas válidas para filtrar próximos eventos.")
+                else: st.info("Nenhum evento ou prazo foi extraído dos documentos ou a extração falhou.")
+            elif "btn_analise_prazos" in st.session_state and st.session_state.btn_analise_prazos:
+                 st.warning("A extração de datas não retornou resultados. Verifique os avisos na função de extração.")
+        elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa:
+            st.warning("O Monitoramento de Prazos funciona melhor com arquivos recém-carregados.")
+        else:
+            st.info("Faça o upload de documentos para ativar o monitoramento de prazos.")
