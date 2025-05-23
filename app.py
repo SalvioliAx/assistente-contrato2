@@ -15,16 +15,16 @@ from langchain.prompts import PromptTemplate
 
 # --- SCHEMA DE DADOS PARA O DASHBOARD ---
 class InfoContrato(BaseModel):
-    """Modelo de dados para extrair informações de um contrato de cartão de crédito."""
+    """Modelo de dados para extrair políticas e condições de um contrato de cartão de crédito."""
     arquivo_fonte: str = Field(description="O nome do arquivo de origem do contrato.")
-    nome_banco: Optional[str] = Field(default=None, description="O nome do banco ou instituição financeira emissora do cartão.")
-    nome_titular: Optional[str] = Field(default=None, description="O nome completo do titular do contrato.")
-    limite_credito: Optional[float] = Field(default=None, description="O valor do limite de crédito total. Extrair apenas o número.")
-    taxa_juros_rotativo: Optional[float] = Field(default=None, description="A taxa de juros mensal do crédito rotativo em percentual. Extrair apenas o número.")
-    valor_anuidade: Optional[float] = Field(default=None, description="O valor da anuidade do cartão. Se for parcelado, some o valor total. Se não houver, coloque 0.")
+    nome_banco: Optional[str] = Field(default="Não encontrado", description="O nome do banco ou instituição financeira emissora do cartão.")
+    condicao_limite_credito: Optional[str] = Field(default="Não encontrado", description="Resumo da política de como o limite de crédito é definido, analisado e alterado.")
+    condicao_juros_rotativo: Optional[str] = Field(default="Não encontrado", description="Resumo da regra de como e quando os juros do crédito rotativo são aplicados.")
+    condicao_anuidade: Optional[str] = Field(default="Não encontrado", description="Resumo da política de cobrança da anuidade, se é diferenciada ou básica e como é cobrada.")
+    condicao_cancelamento: Optional[str] = Field(default="Não encontrado", description="Resumo das condições sob as quais o contrato pode ser rescindido ou cancelado pelo banco ou pelo cliente.")
 
 # --- CONFIGURAÇÃO DA PÁGINA E DA CHAVE DE API ---
-st.set_page_config(layout="wide", page_title="Analisador-IA", page_icon="💳")
+st.set_page_config(layout="wide", page_title="Analisador-IA", page_icon="⚖️")
 try:
     google_api_key = st.secrets["GOOGLE_API_KEY"]
     os.environ["GOOGLE_API_KEY"] = google_api_key
@@ -44,7 +44,7 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 @st.cache_resource(show_spinner="Analisando documentos...")
 def obter_vector_store(lista_arquivos_pdf):
-    if not lista_arquivos_pdf: return None
+    if not lista_arquivos_pdf or not google_api_key: return None
     documentos_totais = []
     for arquivo_pdf in lista_arquivos_pdf:
         with open(arquivo_pdf.name, "wb") as f: f.write(arquivo_pdf.getbuffer())
@@ -59,14 +59,15 @@ def obter_vector_store(lista_arquivos_pdf):
     vector_store = FAISS.from_documents(docs_fragmentados, embeddings)
     return vector_store
 
-@st.cache_data(show_spinner="Extraindo dados para o dashboard... Este processo pode ser lento.")
+@st.cache_data(show_spinner="Extraindo políticas dos contratos... Este processo pode ser lento.")
 def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> list:
+    if not _vector_store or not google_api_key: return []
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
     prompt_template = PromptTemplate.from_template(
-        "Do texto abaixo, extraia a seguinte informação: '{info_desejada}'.\n"
-        "Se a informação não for encontrada, responda com 'Não encontrado'.\n"
-        "Responda apenas com a informação solicitada, sem frases extras.\n\n"
-        "TEXTO:\n{contexto}\n\nINFORMAÇÃO A EXTRAIR:"
+        "Do texto abaixo, resuma em uma ou duas frases a resposta para a seguinte pergunta: '{info_desejada}'.\n"
+        "Se a informação não estiver no texto, responda com 'Não encontrado'.\n"
+        "Seja conciso e direto.\n\n"
+        "TEXTO:\n{contexto}\n\nRESUMO DA RESPOSTA:"
     )
     chain = LLMChain(llm=llm, prompt=prompt_template)
     resultados_finais = []
@@ -74,13 +75,13 @@ def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> 
 
     for i, nome_arquivo in enumerate(_nomes_arquivos):
         dados_contrato_atual = {"arquivo_fonte": nome_arquivo}
-        retriever_arquivo_atual = _vector_store.as_retriever(search_kwargs={'filter': {'source': nome_arquivo}})
+        retriever_arquivo_atual = _vector_store.as_retriever(search_kwargs={'filter': {'source': nome_arquivo}, 'k': 4})
         mapa_campos_perguntas = {
-            "nome_banco": "Qual é o nome do banco ou instituição financeira?",
-            "nome_titular": "Qual é o nome do titular do contrato?",
-            "limite_credito": "Qual é o valor do limite de crédito?",
-            "taxa_juros_rotativo": "Qual a taxa de juros do crédito rotativo em porcentagem?",
-            "valor_anuidade": "Qual o valor da anuidade?"
+            "nome_banco": "Qual o nome do banco ou emissor principal deste contrato?",
+            "condicao_limite_credito": "Qual é a política ou condição para definir o limite de crédito?",
+            "condicao_juros_rotativo": "Sob quais condições os juros do crédito rotativo são aplicados?",
+            "condicao_anuidade": "Qual é a política de cobrança da anuidade descrita no contrato?",
+            "condicao_cancelamento": "Quais são as regras para o cancelamento ou rescisão do contrato?"
         }
         for campo, pergunta in mapa_campos_perguntas.items():
             barra_progresso.progress((i + (list(mapa_campos_perguntas.keys()).index(campo) / len(mapa_campos_perguntas))) / len(_nomes_arquivos), 
@@ -90,24 +91,15 @@ def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> 
             if contexto:
                 resultado = chain.invoke({"info_desejada": pergunta, "contexto": contexto})
                 resposta = resultado['text'].strip()
-                if campo in ["limite_credito", "taxa_juros_rotativo", "valor_anuidade"]:
-                    numeros = re.findall(r"[\d\.,]+", resposta)
-                    if numeros:
-                        try:
-                            valor_limpo = float(numeros[0].replace('.', '').replace(',', '.'))
-                            dados_contrato_atual[campo] = valor_limpo
-                        except ValueError: dados_contrato_atual[campo] = None
-                    else: dados_contrato_atual[campo] = None
-                else:
-                    dados_contrato_atual[campo] = resposta if "não encontrado" not in resposta.lower() else None
-            else: dados_contrato_atual[campo] = None
+                dados_contrato_atual[campo] = resposta
+            else: dados_contrato_atual[campo] = "Contexto não encontrado."
         resultados_finais.append(InfoContrato(**dados_contrato_atual).dict())
     barra_progresso.empty()
     st.success("Análise de todos os documentos concluída!")
     return resultados_finais
 
-# --- LAYOUT PRINCIPAL E SIDEBAR ---
-st.title("💳 Analisador de Contratos IA")
+# --- LAYOUT PRINCIPAL ---
+st.title("⚖️ Analisador de Contratos IA")
 st.sidebar.header("1. Upload dos Contratos")
 arquivos_pdf = st.sidebar.file_uploader(
     "Selecione um ou mais contratos em PDF", type="pdf", accept_multiple_files=True
@@ -128,6 +120,7 @@ tab_chat, tab_dashboard = st.tabs(["💬 Chat com Contratos", "📈 Dashboard An
 # --- ABA DE CHAT (COMPLETA E RESTAURADA) ---
 with tab_chat:
     st.header("Converse com seus documentos")
+    # Template de prompt específico para o chat com highlight
     template_prompt_chat = PromptTemplate.from_template(
         """Use os seguintes trechos de contexto para responder à pergunta no final.
         INSTRUÇÕES DE FORMATAÇÃO DA RESPOSTA:
@@ -139,89 +132,70 @@ with tab_chat:
         RESPOSTA (seguindo o formato acima):"""
     )
     
-    if arquivos_pdf:
+    if arquivos_pdf and google_api_key:
         vector_store = obter_vector_store(arquivos_pdf)
-        if not st.session_state.messages:
-            st.session_state.messages.append({"role": "assistant", "content": "Olá! Os documentos estão prontos para consulta. Qual sua pergunta?"})
+        if vector_store:
+            if not st.session_state.messages:
+                st.session_state.messages.append({"role": "assistant", "content": "Olá! Os documentos estão prontos para consulta. Qual sua pergunta?"})
 
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-                if "sources" in message:
-                    with st.expander("Ver Fontes Utilizadas"):
-                        for doc in message["sources"]:
-                            texto_fonte = doc.page_content
-                            sentenca_chave = message.get("sentenca_chave")
-                            if sentenca_chave and sentenca_chave in texto_fonte:
-                                texto_formatado = texto_fonte.replace(sentenca_chave, f"<span style='background-color: #FFFACD; padding: 2px; border-radius: 3px;'>{sentenca_chave}</span>")
-                            else: texto_formatado = texto_fonte
-                            st.markdown(f"**Fonte: `{doc.metadata.get('source', 'N/A')}` (Página {doc.metadata.get('page', 'N/A')})**")
-                            st.markdown(texto_formatado, unsafe_allow_html=True)
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+                    if "sources" in message:
+                        with st.expander("Ver Fontes Utilizadas"):
+                            for doc in message["sources"]:
+                                texto_fonte = doc.page_content
+                                sentenca_chave = message.get("sentenca_chave")
+                                if sentenca_chave and sentenca_chave in texto_fonte:
+                                    texto_formatado = texto_fonte.replace(sentenca_chave, f"<span style='background-color: #FFFACD; padding: 2px; border-radius: 3px;'>{sentenca_chave}</span>")
+                                else: texto_formatado = texto_fonte
+                                st.markdown(f"**Fonte: `{doc.metadata.get('source', 'N/A')}` (Página {doc.metadata.get('page', 'N/A')})**")
+                                st.markdown(texto_formatado, unsafe_allow_html=True)
 
-        if prompt := st.chat_input("Faça sua pergunta sobre os contratos..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"): st.markdown(prompt)
+            if prompt := st.chat_input("Faça sua pergunta sobre os contratos..."):
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"): st.markdown(prompt)
 
-            with st.chat_message("assistant"):
-                with st.spinner("Pesquisando e formulando a resposta..."):
-                    llm_chat = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
-                    qa_chain = RetrievalQA.from_chain_type(
-                        llm=llm_chat, chain_type="stuff",
-                        retriever=vector_store.as_retriever(search_kwargs={"k": 5}),
-                        return_source_documents=True,
-                        chain_type_kwargs={"prompt": template_prompt_chat.partial(language=idioma_selecionado)}
-                    )
-                    resultado = qa_chain({"query": prompt})
-                    resposta_bruta = resultado["result"]
-                    fontes = resultado["source_documents"]
-                    try:
-                        resposta_principal, sentenca_chave = resposta_bruta.split('|||')
-                        sentenca_chave = sentenca_chave.strip()
-                    except ValueError:
-                        resposta_principal = resposta_bruta
-                        sentenca_chave = None
-                    st.markdown(resposta_principal)
-                    st.session_state.messages.append({"role": "assistant", "content": resposta_principal, "sources": fontes, "sentenca_chave": sentenca_chave})
-                    st.rerun()
+                with st.chat_message("assistant"):
+                    with st.spinner("Pesquisando e formulando a resposta..."):
+                        llm_chat = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
+                        qa_chain = RetrievalQA.from_chain_type(
+                            llm=llm_chat, chain_type="stuff",
+                            retriever=vector_store.as_retriever(search_kwargs={"k": 5}),
+                            return_source_documents=True,
+                            chain_type_kwargs={"prompt": template_prompt_chat.partial(language=idioma_selecionado)}
+                        )
+                        resultado = qa_chain({"query": prompt})
+                        resposta_bruta = resultado["result"]
+                        fontes = resultado["source_documents"]
+                        try:
+                            resposta_principal, sentenca_chave = resposta_bruta.split('|||')
+                            sentenca_chave = sentenca_chave.strip()
+                        except ValueError:
+                            resposta_principal, sentenca_chave = resposta_bruta, None
+                        
+                        st.markdown(resposta_principal)
+                        st.session_state.messages.append({"role": "assistant", "content": resposta_principal, "sources": fontes, "sentenca_chave": sentenca_chave})
+                        st.rerun()
 
     else:
-        st.info("Por favor, faça o upload de um ou mais documentos em PDF para começar.")
+        st.info("Por favor, faça o upload de um ou mais documentos e configure a chave de API na barra lateral para começar.")
 
-# --- ABA DE DASHBOARD (COMPLETA) ---
+# --- ABA DE DASHBOARD (COMPLETA E RESTAURADA) ---
 with tab_dashboard:
-    st.header("Análise Comparativa dos Contratos")
-    st.markdown("Clique no botão abaixo para extrair e comparar os dados chave de todos os documentos carregados.")
-    if arquivos_pdf:
-        if st.button("🚀 Gerar Análise Comparativa"):
-            if not google_api_key:
-                st.error("Por favor, configure sua chave de API do Google para continuar.")
-            else:
-                vector_store = obter_vector_store(arquivos_pdf)
-                nomes_arquivos = [f.name for f in arquivos_pdf]
-                dados_extraidos = extrair_dados_dos_contratos(vector_store, nomes_arquivos)
-                if dados_extraidos:
-                    df = pd.DataFrame(dados_extraidos)
-                    st.session_state.df_dashboard = df # Salva o dataframe no estado da sessão
-                    st.rerun() # Recarrega para exibir os dados abaixo
+    st.header("Análise Comparativa de Políticas Contratuais")
+    st.markdown("Clique no botão abaixo para extrair e comparar as **políticas e condições chave** de todos os documentos carregados.")
+    if arquivos_pdf and google_api_key:
+        if st.button("🚀 Gerar Análise Comparativa de Políticas"):
+            vector_store = obter_vector_store(arquivos_pdf)
+            nomes_arquivos = [f.name for f in arquivos_pdf]
+            dados_extraidos = extrair_dados_dos_contratos(vector_store, nomes_arquivos)
+            if dados_extraidos:
+                df = pd.DataFrame(dados_extraidos)
+                st.session_state.df_dashboard = df # Salva o dataframe no estado da sessão
         
-        # Exibe o dataframe se ele existir no estado da sessão
         if 'df_dashboard' in st.session_state:
-            df = st.session_state.df_dashboard
-            st.info("Dica: Clique no cabeçalho de uma coluna para ordenar os dados.")
-            st.dataframe(df)
-            
-            st.subheader("Estatísticas Rápidas")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write("Taxa de Juros do Rotativo (%)")
-                if 'taxa_juros_rotativo' in df.columns and not df['taxa_juros_rotativo'].dropna().empty:
-                    st.write(df['taxa_juros_rotativo'].dropna().describe())
-                else: st.write("Nenhum dado encontrado.")
-            with col2:
-                st.write("Limite de Crédito (R$)")
-                if 'limite_credito' in df.columns and not df['limite_credito'].dropna().empty:
-                    st.write(df['limite_credito'].dropna().describe())
-                else: st.write("Nenhum dado encontrado.")
-
+            st.info("Tabela de políticas contratuais. Use a barra de rolagem horizontal para ver todas as colunas.")
+            st.dataframe(st.session_state.df_dashboard)
     else:
-        st.info("Por favor, faça o upload dos documentos na barra lateral para ativar o dashboard.")
+        st.info("Por favor, faça o upload dos documentos e configure a chave de API na barra lateral para ativar o dashboard.")
