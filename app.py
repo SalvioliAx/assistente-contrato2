@@ -117,47 +117,55 @@ if "messages" not in st.session_state:
 # --- LÓGICA DAS ABAS ---
 tab_chat, tab_dashboard = st.tabs(["💬 Chat com Contratos", "📈 Dashboard Analítico"])
 
-# --- ABA DE CHAT (COMPLETA E RESTAURADA) ---
+# --- ABA DE CHAT (LÓGICA DE EXIBIÇÃO CORRIGIDA) ---
 with tab_chat:
     st.header("Converse com seus documentos")
-    # Template de prompt específico para o chat com highlight
-    template_prompt_chat = PromptTemplate.from_template(
-        """Use os seguintes trechos de contexto para responder à pergunta no final.
-        INSTRUÇÕES DE FORMATAÇÃO DA RESPOSTA:
-        Sua resposta final deve ter duas partes, separadas por '|||'.
-        1. Parte 1: A resposta completa e detalhada para a pergunta do usuário, no idioma {language}.
-        2. Parte 2: A citação exata e literal da sentença do contexto que foi mais importante para formular a resposta.
-        CONTEXTO: {context}
-        PERGUNTA: {question}
-        RESPOSTA (seguindo o formato acima):"""
-    )
     
     if arquivos_pdf and google_api_key:
+        # Prepara o motor de IA (vector_store) assim que os arquivos são carregados
         vector_store = obter_vector_store(arquivos_pdf)
-        if vector_store:
-            if not st.session_state.messages:
-                st.session_state.messages.append({"role": "assistant", "content": "Olá! Os documentos estão prontos para consulta. Qual sua pergunta?"})
 
-            for message in st.session_state.messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-                    if "sources" in message:
-                        with st.expander("Ver Fontes Utilizadas"):
-                            for doc in message["sources"]:
-                                texto_fonte = doc.page_content
-                                sentenca_chave = message.get("sentenca_chave")
-                                if sentenca_chave and sentenca_chave in texto_fonte:
-                                    texto_formatado = texto_fonte.replace(sentenca_chave, f"<span style='background-color: #FFFACD; padding: 2px; border-radius: 3px;'>{sentenca_chave}</span>")
-                                else: texto_formatado = texto_fonte
-                                st.markdown(f"**Fonte: `{doc.metadata.get('source', 'N/A')}` (Página {doc.metadata.get('page', 'N/A')})**")
-                                st.markdown(texto_formatado, unsafe_allow_html=True)
+        # Mensagem inicial, se o histórico estiver vazio
+        if not st.session_state.messages:
+            st.session_state.messages.append({"role": "assistant", "content": "Olá! Seus documentos foram analisados. Qual sua pergunta?"})
 
-            if prompt := st.chat_input("Faça sua pergunta sobre os contratos..."):
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user"): st.markdown(prompt)
+        # Exibe o histórico de mensagens existente
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+                if "sources" in message:
+                    # (A lógica de exibir fontes com highlight permanece a mesma)
+                    with st.expander("Ver Fontes Utilizadas"):
+                        for doc in message["sources"]:
+                            texto_fonte = doc.page_content
+                            sentenca_chave = message.get("sentenca_chave")
+                            if sentenca_chave and sentenca_chave in texto_fonte:
+                                texto_formatado = texto_fonte.replace(sentenca_chave, f"<span style='background-color: #FFFACD; padding: 2px; border-radius: 3px;'>{sentenca_chave}</span>")
+                            else: texto_formatado = texto_fonte
+                            st.markdown(f"**Fonte: `{doc.metadata.get('source', 'N/A')}` (Página {doc.metadata.get('page', 'N/A')})**")
+                            st.markdown(texto_formatado, unsafe_allow_html=True)
 
-                with st.chat_message("assistant"):
+        # MUDANÇA PRINCIPAL: O st.chat_input agora fica aqui fora, menos aninhado.
+        if prompt := st.chat_input("Faça sua pergunta sobre os contratos..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+            with st.chat_message("assistant"):
+                # A verificação do motor de IA acontece aqui, antes de responder.
+                if vector_store is not None:
                     with st.spinner("Pesquisando e formulando a resposta..."):
+                        # Template de prompt específico para o chat com highlight
+                        template_prompt_chat = PromptTemplate.from_template(
+                            """Use os seguintes trechos de contexto para responder à pergunta no final.
+                            INSTRUÇÕES DE FORMATAÇÃO DA RESPOSTA:
+                            Sua resposta final deve ter duas partes, separadas por '|||'.
+                            1. Parte 1: A resposta completa e detalhada para a pergunta do usuário, no idioma {language}.
+                            2. Parte 2: A citação exata e literal da sentença do contexto que foi mais importante para formular a resposta.
+                            CONTEXTO: {context}
+                            PERGUNTA: {question}
+                            RESPOSTA (seguindo o formato acima):"""
+                        )
                         llm_chat = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
                         qa_chain = RetrievalQA.from_chain_type(
                             llm=llm_chat, chain_type="stuff",
@@ -177,22 +185,27 @@ with tab_chat:
                         st.markdown(resposta_principal)
                         st.session_state.messages.append({"role": "assistant", "content": resposta_principal, "sources": fontes, "sentenca_chave": sentenca_chave})
                         st.rerun()
+                else:
+                    st.error("O motor de IA não pôde ser iniciado. Verifique os arquivos e a chave de API.")
 
     else:
         st.info("Por favor, faça o upload de um ou mais documentos e configure a chave de API na barra lateral para começar.")
 
-# --- ABA DE DASHBOARD (COMPLETA E RESTAURADA) ---
+# --- ABA DE DASHBOARD (sem alterações nesta versão) ---
 with tab_dashboard:
+    # A lógica do dashboard permanece a mesma da versão anterior.
     st.header("Análise Comparativa de Políticas Contratuais")
     st.markdown("Clique no botão abaixo para extrair e comparar as **políticas e condições chave** de todos os documentos carregados.")
     if arquivos_pdf and google_api_key:
         if st.button("🚀 Gerar Análise Comparativa de Políticas"):
-            vector_store = obter_vector_store(arquivos_pdf)
-            nomes_arquivos = [f.name for f in arquivos_pdf]
-            dados_extraidos = extrair_dados_dos_contratos(vector_store, nomes_arquivos)
-            if dados_extraidos:
-                df = pd.DataFrame(dados_extraidos)
-                st.session_state.df_dashboard = df # Salva o dataframe no estado da sessão
+            vector_store_dash = obter_vector_store(arquivos_pdf)
+            if vector_store_dash:
+                nomes_arquivos = [f.name for f in arquivos_pdf]
+                dados_extraidos = extrair_dados_dos_contratos(vector_store_dash, nomes_arquivos)
+                if dados_extraidos:
+                    st.session_state.df_dashboard = pd.DataFrame(dados_extraidos)
+            else:
+                st.error("Não foi possível analisar os documentos para o dashboard.")
         
         if 'df_dashboard' in st.session_state:
             st.info("Tabela de políticas contratuais. Use a barra de rolagem horizontal para ver todas as colunas.")
