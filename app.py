@@ -6,7 +6,8 @@ import re
 from datetime import datetime, date
 import json
 from pathlib import Path
-import numpy as np # Para cálculos estatísticos
+import numpy as np
+import time # Importado para adicionar pausas
 
 # Importações do LangChain e Pydantic
 from pydantic import BaseModel, Field
@@ -24,38 +25,29 @@ COLECOES_DIR = Path("colecoes_ia")
 COLECOES_DIR.mkdir(exist_ok=True)
 
 # --- SCHEMAS DE DADOS ---
-# ATUALIZAÇÃO DO InfoContrato para incluir campos mais quantificáveis/categorizáveis
 class InfoContrato(BaseModel):
     arquivo_fonte: str = Field(description="O nome do arquivo de origem do contrato.")
     nome_banco_emissor: Optional[str] = Field(default="Não encontrado", description="O nome do banco ou instituição financeira principal mencionada.")
-    
-    # Campos para Detecção de Anomalias (Exemplos - Adapte à sua necessidade!)
     valor_principal_numerico: Optional[float] = Field(default=None, description="Se houver um valor monetário principal claramente definido no contrato (ex: valor total do contrato, valor do empréstimo, limite de crédito principal), extraia apenas o número. Caso contrário, deixe como não encontrado.")
     prazo_total_meses: Optional[int] = Field(default=None, description="Se houver um prazo de vigência total do contrato claramente definido em meses ou anos, converta para meses e extraia apenas o número. Caso contrário, deixe como não encontrado.")
     taxa_juros_anual_numerica: Optional[float] = Field(default=None, description="Se uma taxa de juros principal (anual ou claramente conversível para anual) for mencionada, extraia apenas o número percentual. Caso contrário, deixe como não encontrado.")
     possui_clausula_rescisao_multa: Optional[str] = Field(default="Não claro", description="O contrato menciona explicitamente uma multa em caso de rescisão? Responda 'Sim', 'Não', ou 'Não claro'.")
-    
-    # Campos de política (mantidos do dashboard anterior)
     condicao_limite_credito: Optional[str] = Field(default="Não encontrado", description="Resumo da política de como o limite de crédito é definido, analisado e alterado.")
     condicao_juros_rotativo: Optional[str] = Field(default="Não encontrado", description="Resumo da regra de como e quando os juros do crédito rotativo são aplicados.")
     condicao_anuidade: Optional[str] = Field(default="Não encontrado", description="Resumo da política de cobrança da anuidade.")
     condicao_cancelamento: Optional[str] = Field(default="Não encontrado", description="Resumo das condições para cancelamento do contrato.")
 
-
 class EventoContratual(BaseModel):
-    # ... (schema como antes)
     descricao_evento: str = Field(description="Uma descrição clara e concisa do evento ou prazo.")
     data_evento_str: Optional[str] = Field(default="Não Especificado", description="A data do evento no formato YYYY-MM-DD. Se não aplicável, use 'Não Especificado'.")
     trecho_relevante: Optional[str] = Field(default=None, description="O trecho exato do contrato que menciona este evento/data.")
 
 class ListaDeEventos(BaseModel):
-    # ... (schema como antes)
     eventos: List[EventoContratual] = Field(description="Lista de eventos contratuais com suas datas.")
     arquivo_fonte: str = Field(description="O nome do arquivo de origem do contrato de onde estes eventos foram extraídos.")
 
 # --- CONFIGURAÇÃO DA PÁGINA E DA CHAVE DE API ---
-st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡") # Novo ícone
-# ... (resto da configuração como antes) ...
+st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
 try:
     google_api_key = st.secrets["GOOGLE_API_KEY"]
     os.environ["GOOGLE_API_KEY"] = google_api_key
@@ -68,10 +60,10 @@ hide_streamlit_style = "<style>#MainMenu {visibility: hidden;} footer {visibilit
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # --- FUNÇÕES DE GERENCIAMENTO DE COLEÇÕES ---
-# (Funções listar_colecoes_salvas, salvar_colecao_atual, carregar_colecao permanecem as mesmas)
 def listar_colecoes_salvas():
     if not COLECOES_DIR.exists(): return []
     return [d.name for d in COLECOES_DIR.iterdir() if d.is_dir()]
+
 def salvar_colecao_atual(nome_colecao, vector_store_atual, nomes_arquivos_atuais):
     if not nome_colecao.strip(): st.error("Por favor, forneça um nome para a coleção."); return False
     caminho_colecao = COLECOES_DIR / nome_colecao
@@ -81,6 +73,7 @@ def salvar_colecao_atual(nome_colecao, vector_store_atual, nomes_arquivos_atuais
         with open(caminho_colecao / "manifest.json", "w") as f: json.dump(nomes_arquivos_atuais, f)
         st.success(f"Coleção '{nome_colecao}' salva com sucesso!"); return True
     except Exception as e: st.error(f"Erro ao salvar coleção: {e}"); return False
+
 @st.cache_resource(show_spinner="Carregando coleção...")
 def carregar_colecao(nome_colecao, _embeddings_obj):
     caminho_colecao = COLECOES_DIR / nome_colecao; caminho_indice = caminho_colecao / "faiss_index"; caminho_manifesto = caminho_colecao / "manifest.json"
@@ -107,56 +100,52 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
     vector_store = FAISS.from_documents(docs_fragmentados, _embeddings_obj)
     return vector_store, [f.name for f in lista_arquivos_pdf_upload]
 
-# ATUALIZADA para o novo InfoContrato e com tentativa de extrair números
+# ATUALIZADA para o novo InfoContrato e com time.sleep
 @st.cache_data(show_spinner="Extraindo dados detalhados dos contratos...")
 def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> list:
     if not _vector_store or not google_api_key or not _nomes_arquivos: return []
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
     
     resultados_finais = []
+    # Mapeia os campos do InfoContrato para perguntas mais diretas e instruções de extração
+    mapa_campos_para_extracao = {
+        "nome_banco_emissor": ("Qual o nome principal do banco, instituição financeira ou empresa emissora deste contrato?", "Responda apenas com o nome. Se não encontrar, diga 'Não encontrado'."),
+        "valor_principal_numerico": ("Qual o valor monetário principal ou limite de crédito central deste contrato?", "Se encontrar um valor, forneça apenas o número (ex: 10000.50). Se não encontrar, responda 'Não encontrado'."),
+        "prazo_total_meses": ("Qual o prazo de vigência total deste contrato em meses? Se estiver em anos, converta para meses.", "Se encontrar, forneça apenas o número de meses. Se não encontrar, responda 'Não encontrado'."),
+        "taxa_juros_anual_numerica": ("Qual a principal taxa de juros anual (ou facilmente conversível para anual) mencionada?", "Se encontrar, forneça apenas o número percentual (ex: 12.5). Se não encontrar, responda 'Não encontrado'."),
+        "possui_clausula_rescisao_multa": ("Este contrato menciona explicitamente uma multa monetária ou percentual em caso de rescisão?", "Responda apenas com 'Sim', 'Não', ou 'Não claro'."),
+        "condicao_limite_credito": ("Qual é a política ou condição para definir o limite de crédito?", "Resuma a política em uma ou duas frases. Se não encontrar, responda 'Não encontrado'."),
+        "condicao_juros_rotativo": ("Sob quais condições os juros do crédito rotativo são aplicados?", "Resuma a regra em uma ou duas frases. Se não encontrar, responda 'Não encontrado'."),
+        "condicao_anuidade": ("Qual é a política de cobrança da anuidade descrita no contrato?", "Resuma a política em uma ou duas frases. Se não encontrar, responda 'Não encontrado'."),
+        "condicao_cancelamento": ("Quais são as regras para o cancelamento ou rescisão do contrato?", "Resuma as regras em uma ou duas frases. Se não encontrar, responda 'Não encontrado'.")
+    }
+    
+    total_campos_a_extrair = len(mapa_campos_para_extracao)
+    total_operacoes = len(_nomes_arquivos) * total_campos_a_extrair
+    operacao_atual = 0
+
     barra_progresso = st.progress(0, text="Iniciando extração detalhada...")
 
-    # Mapa de campos para perguntas mais diretas, focando nos novos campos
-    mapa_campos_perguntas = {
-        "nome_banco_emissor": "Qual o nome principal do banco, instituição financeira ou empresa emissora deste contrato?",
-        "valor_principal_numerico": "Qual o valor monetário principal ou limite de crédito central deste contrato? Forneça apenas o número.",
-        "prazo_total_meses": "Qual o prazo de vigência total deste contrato em meses? Se estiver em anos, converta para meses. Forneça apenas o número.",
-        "taxa_juros_anual_numerica": "Qual a principal taxa de juros anual (ou facilmente conversível para anual) mencionada? Forneça apenas o número percentual.",
-        "possui_clausula_rescisao_multa": "Este contrato menciona explicitamente uma multa em caso de rescisão? Responda 'Sim', 'Não', ou 'Não claro'.",
-        "condicao_limite_credito": "Qual é a política ou condição para definir o limite de crédito?",
-        "condicao_juros_rotativo": "Sob quais condições os juros do crédito rotativo são aplicados?",
-        "condicao_anuidade": "Qual é a política de cobrança da anuidade descrita no contrato?",
-        "condicao_cancelamento": "Quais são as regras para o cancelamento ou rescisão do contrato?"
-    }
-
-    for i, nome_arquivo in enumerate(_nomes_arquivos):
+    for nome_arquivo in _nomes_arquivos:
         dados_contrato_atual = {"arquivo_fonte": nome_arquivo}
-        retriever_arquivo_atual = _vector_store.as_retriever(search_kwargs={'filter': {'source': nome_arquivo}, 'k': 3}) # Menos chunks para maior precisão na extração de valores
+        retriever_arquivo_atual = _vector_store.as_retriever(search_kwargs={'filter': {'source': nome_arquivo}, 'k': 3})
         
-        for campo, pergunta_chave in mapa_campos_perguntas.items():
-            barra_progresso.progress((i + (list(mapa_campos_perguntas.keys()).index(campo) / len(mapa_campos_perguntas))) / len(_nomes_arquivos),
-                                     text=f"Extraindo '{campo}' de {nome_arquivo}")
+        for campo, (pergunta_chave, instrucao_adicional) in mapa_campos_para_extracao.items():
+            operacao_atual += 1
+            barra_progresso.progress(operacao_atual / total_operacoes,
+                                     text=f"Extraindo '{campo}' de {nome_arquivo} ({operacao_atual}/{total_operacoes})")
             
             docs_relevantes = retriever_arquivo_atual.get_relevant_documents(pergunta_chave)
             contexto = "\n\n".join([doc.page_content for doc in docs_relevantes])
 
-            prompt_extracao_especifica = PromptTemplate.from_template(
-                "Com base no contexto fornecido, responda à seguinte pergunta de forma concisa. {instrucao_adicional}\n\n"
+            prompt_extracao = PromptTemplate.from_template(
+                "Com base no contexto fornecido, responda à seguinte pergunta de forma precisa. {instrucao_adicional}\n\n"
                 "Contexto:\n{contexto}\n\n"
                 "Pergunta: {pergunta}\n"
                 "Resposta:"
             )
-            chain_extracao = LLMChain(llm=llm, prompt=prompt_extracao_especifica)
+            chain_extracao = LLMChain(llm=llm, prompt=prompt_extracao)
             
-            instrucao_adicional = ""
-            if "numerico" in campo or "meses" in campo:
-                instrucao_adicional = "Se encontrar um valor, forneça apenas o número (ex: 10.5 ou 12). Se não encontrar, responda 'Não encontrado'."
-            elif "possui_clausula" in campo:
-                instrucao_adicional = "Responda apenas com 'Sim', 'Não', ou 'Não claro'."
-            else: # campos de condição (texto)
-                 instrucao_adicional = "Resuma a política em uma ou duas frases. Se não encontrar, responda 'Não encontrado'."
-
-
             if contexto:
                 try:
                     resultado = chain_extracao.invoke({
@@ -166,99 +155,72 @@ def extrair_dados_dos_contratos(_vector_store: FAISS, _nomes_arquivos: list) -> 
                     })
                     resposta = resultado['text'].strip()
 
-                    # Limpeza e conversão para campos numéricos
                     if campo in ["valor_principal_numerico", "prazo_total_meses", "taxa_juros_anual_numerica"]:
                         numeros = re.findall(r"[\d\.,]+", resposta)
                         if numeros:
                             try:
-                                valor_limpo = numeros[0].replace('.', '').replace(',', '.')
-                                dados_contrato_atual[campo] = float(valor_limpo) if "." in valor_limpo else int(valor_limpo)
-                            except ValueError:
-                                dados_contrato_atual[campo] = None # Não conseguiu converter
-                        else:
-                            dados_contrato_atual[campo] = None # Não encontrou número
+                                valor_str = numeros[0].replace('.', '').replace(',', '.')
+                                if campo == "prazo_total_meses":
+                                    dados_contrato_atual[campo] = int(float(valor_str))
+                                else:
+                                    dados_contrato_atual[campo] = float(valor_str)
+                            except ValueError: dados_contrato_atual[campo] = None
+                        else: dados_contrato_atual[campo] = None
                     elif campo == "possui_clausula_rescisao_multa":
                         if "sim" in resposta.lower(): dados_contrato_atual[campo] = "Sim"
                         elif "não" in resposta.lower() or "nao" in resposta.lower() : dados_contrato_atual[campo] = "Não"
                         else: dados_contrato_atual[campo] = "Não claro"
-                    else:
+                    else: # Campos de texto/condição
                         dados_contrato_atual[campo] = resposta if "não encontrado" not in resposta.lower() else "Não encontrado"
-
                 except Exception as e_invoke:
                     st.warning(f"Erro ao invocar LLM para '{campo}' em {nome_arquivo}: {e_invoke}")
                     dados_contrato_atual[campo] = None if "numerico" in campo or "meses" in campo else "Erro na IA"
             else:
                 dados_contrato_atual[campo] = None if "numerico" in campo or "meses" in campo else "Contexto não encontrado"
-        
-        # Validação com Pydantic antes de adicionar
+            
+            time.sleep(2) # <--- ADICIONADO O RESPIRO DE 2 SEGUNDOS ENTRE CHAMADAS DE CAMPO
+
         try:
             info_validada = InfoContrato(**dados_contrato_atual)
             resultados_finais.append(info_validada.dict())
         except Exception as e_pydantic:
             st.error(f"Erro de validação Pydantic para {nome_arquivo}: {e_pydantic}. Dados: {dados_contrato_atual}")
-            # Adiciona um registro de erro, preenchendo com defaults para manter a estrutura do DataFrame
-            resultados_finais.append(InfoContrato(arquivo_fonte=nome_arquivo).dict())
-
-
+            resultados_finais.append(InfoContrato(arquivo_fonte=nome_arquivo).dict(exclude_none=True))
+            
     barra_progresso.empty()
     st.success("Extração detalhada para dashboard e anomalias concluída!")
     return resultados_finais
 
-# --- NOVA FUNÇÃO PARA DETECÇÃO DE ANOMALIAS ---
 def detectar_anomalias_no_dataframe(df: pd.DataFrame) -> List[str]:
+    # (sem alterações)
     anomalias_encontradas = []
-    if df.empty:
-        return ["Nenhum dado para analisar anomalias."]
-
-    # Campos numéricos para análise de outliers
+    if df.empty: return ["Nenhum dado para analisar anomalias."]
     campos_numericos = ["valor_principal_numerico", "prazo_total_meses", "taxa_juros_anual_numerica"]
     for campo in campos_numericos:
         if campo in df.columns:
-            # Converte para numérico, erros viram NaN, depois remove NaNs
             serie = pd.to_numeric(df[campo], errors='coerce').dropna()
-            if not serie.empty and len(serie) > 1: # Precisa de pelo menos 2 pontos para desvio padrão
-                media = serie.mean()
-                desvio_pad = serie.std()
-                limite_superior = media + 2 * desvio_pad
-                limite_inferior = media - 2 * desvio_pad
-
-                # Identifica outliers
-                outliers = df[
-                    (pd.to_numeric(df[campo], errors='coerce') > limite_superior) |
-                    (pd.to_numeric(df[campo], errors='coerce') < limite_inferior)
-                ]
+            if not serie.empty and len(serie) > 1:
+                media = serie.mean(); desvio_pad = serie.std()
+                limite_superior = media + 2 * desvio_pad; limite_inferior = media - 2 * desvio_pad
+                outliers = df[(pd.to_numeric(df[campo], errors='coerce') > limite_superior) | (pd.to_numeric(df[campo], errors='coerce') < limite_inferior)]
                 for _, linha in outliers.iterrows():
-                    anomalias_encontradas.append(
-                        f"**Anomalia Numérica em `{linha['arquivo_fonte']}`:** Campo '{campo}' com valor `{linha[campo]}` "
-                        f"está distante da média ({media:.2f} ± {2*desvio_pad:.2f})."
-                    )
-            elif len(serie) == 1:
-                 anomalias_encontradas.append(f"**Info:** Campo '{campo}' possui apenas um valor numérico (`{serie.iloc[0]}`), não sendo possível análise de desvio.")
-
-
-    # Campos categóricos para análise de frequência
-    campos_categoricos = ["possui_clausula_rescisao_multa", "nome_banco_emissor"] # Adicionar outros se relevante
+                    anomalias_encontradas.append(f"**Anomalia Numérica em `{linha['arquivo_fonte']}`:** Campo '{campo}' com valor `{linha[campo]}` está distante da média ({media:.2f} ± {2*desvio_pad:.2f}).")
+            elif len(serie) == 1: anomalias_encontradas.append(f"**Info:** Campo '{campo}' possui apenas um valor numérico (`{serie.iloc[0]}`), não sendo possível análise de desvio.")
+    campos_categoricos = ["possui_clausula_rescisao_multa", "nome_banco_emissor"]
     for campo in campos_categoricos:
         if campo in df.columns:
-            contagem_valores = df[campo].value_counts(normalize=True) # normalize=True para obter percentuais
-            # Considera anômalo se uma categoria aparece em menos de 10% dos casos (e há mais de 5 contratos)
+            contagem_valores = df[campo].value_counts(normalize=True)
             if len(df) > 5:
                 categorias_raras = contagem_valores[contagem_valores < 0.1]
                 for categoria, freq in categorias_raras.items():
                     documentos_com_categoria_rara = df[df[campo] == categoria]['arquivo_fonte'].tolist()
-                    anomalias_encontradas.append(
-                        f"**Anomalia Categórica:** O valor/categoria '`{categoria}`' para o campo '{campo}' "
-                        f"é incomum (presente em {freq*100:.1f}% dos contratos: {', '.join(documentos_com_categoria_rara[:3])}{'...' if len(documentos_com_categoria_rara) > 3 else ''})."
-                    )
-    
-    if not anomalias_encontradas:
-        return ["Nenhuma anomalia significativa detectada com os critérios atuais."]
+                    anomalias_encontradas.append(f"**Anomalia Categórica:** O valor/categoria '`{categoria}`' para o campo '{campo}' é incomum (presente em {freq*100:.1f}% dos contratos: {', '.join(documentos_com_categoria_rara[:3])}{'...' if len(documentos_com_categoria_rara) > 3 else ''}).")
+    if not anomalias_encontradas: return ["Nenhuma anomalia significativa detectada com os critérios atuais."]
     return anomalias_encontradas
 
-
-# ... (gerar_resumo_executivo, analisar_documento_para_riscos, extrair_eventos_dos_contratos, formatar_chat_para_markdown permanecem os mesmos)
 @st.cache_data(show_spinner="Gerando resumo executivo...")
 def gerar_resumo_executivo(arquivo_pdf_bytes, nome_arquivo_original):
+    # (sem alterações)
     if not arquivo_pdf_bytes or not google_api_key: return "Erro: Arquivo ou chave de API não fornecidos."
     temp_file_path = Path(f"temp_resumo_{nome_arquivo_original}")
     with open(temp_file_path, "wb") as f: f.write(arquivo_pdf_bytes)
@@ -278,10 +240,12 @@ def gerar_resumo_executivo(arquivo_pdf_bytes, nome_arquivo_original):
 
 @st.cache_data(show_spinner="Analisando riscos no documento...")
 def analisar_documento_para_riscos(texto_completo_doc, nome_arquivo_doc):
+    # (sem alterações)
     if not texto_completo_doc or not google_api_key: return f"Não foi possível analisar riscos para '{nome_arquivo_doc}': Texto ou Chave API ausente."
     llm_riscos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
     prompt_riscos_template = PromptTemplate.from_template(
         "Você é um advogado especialista em análise de riscos contratuais. "
+        # ... (prompt de riscos completo)
         "Analise o texto do contrato fornecido abaixo e identifique cláusulas ou omissões que possam representar riscos significativos. "
         "Para cada risco identificado, por favor:\n1. Descreva o risco de forma clara e concisa.\n"
         "2. Cite o trecho exato da cláusula relevante (ou mencione a ausência de uma cláusula esperada).\n"
@@ -295,13 +259,15 @@ def analisar_documento_para_riscos(texto_completo_doc, nome_arquivo_doc):
 
 @st.cache_data(show_spinner="Extraindo datas e prazos dos contratos...")
 def extrair_eventos_dos_contratos(textos_completos_docs: List[dict]) -> List[dict]:
+    # (sem alterações nesta função, já corrigida anteriormente)
     if not textos_completos_docs or not google_api_key: return []
+    # ... (código da função como na última versão) ...
     llm_eventos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0, request_timeout=120)
     parser = PydanticOutputParser(pydantic_object=ListaDeEventos)
     prompt_eventos_template_str = """Analise o texto do contrato abaixo. Sua tarefa é identificar TODOS os eventos, datas, prazos e períodos importantes mencionados.
 Para cada evento encontrado, extraia as seguintes informações:
 1.  'descricao_evento': Uma descrição clara e concisa do evento (ex: 'Data de assinatura do contrato', 'Vencimento da primeira parcela', 'Prazo final para entrega do produto', 'Início da vigência', 'Período de carência para alteração de vencimento').
-2.  'data_evento_str': A data específica do evento no formato<y_bin_46>MM-DD. Se uma data EXATA não puder ser determinada ou não se aplicar (ex: '10 dias antes do vencimento', 'prazo indeterminado', 'na fatura mensal'), preencha este campo OBRIGATORIAMENTE com la string 'Não Especificado'. NUNCA use null, None ou deixe o campo vazio.
+2.  'data_evento_str': A data específica do evento no formato YYYY-MM-DD. Se uma data EXATA não puder ser determinada ou não se aplicar (ex: '10 dias antes do vencimento', 'prazo indeterminado', 'na fatura mensal'), preencha este campo OBRIGATORIAMENTE com la string 'Não Especificado'. NUNCA use null, None ou deixe o campo vazio.
 3.  'trecho_relevante': O trecho curto e exato do contrato que menciona este evento/data.
 
 {format_instructions}
@@ -353,10 +319,11 @@ LISTA DE EVENTOS ENCONTRADOS:"""
     else: st.success("Extração de datas e prazos concluída!")
     return todos_os_eventos_formatados
 
+
 @st.cache_data(show_spinner="Verificando conformidade do documento...")
 def verificar_conformidade_documento(texto_doc_referencia, nome_doc_referencia, texto_doc_analisar, nome_doc_analisar):
     # (sem alterações)
-    if not texto_doc_referencia or not texto_doc_analisar or not google_api_key: return "Erro: Textos dos documentos ou Chave API ausentes para verificação de conformidade."
+    if not texto_doc_referencia or not texto_doc_analisar or not google_api_key: return "Erro: Textos dos documentos ou Chave API ausentes."
     # ... (código da função como antes) ...
     llm_conformidade = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1, request_timeout=180)
     prompt_conformidade_template = PromptTemplate.from_template(
@@ -412,28 +379,28 @@ else:
 # --- LAYOUT PRINCIPAL E SIDEBAR ---
 st.title("💡 Analisador-IA ProMax")
 st.sidebar.header("Gerenciar Documentos")
-# ... (sidebar como antes) ...
-modo_documento = st.sidebar.radio("Como carregar os documentos?", ("Fazer novo upload de PDFs", "Carregar coleção existente"), key="modo_doc_radio")
+modo_documento = st.sidebar.radio("Como carregar os documentos?", ("Fazer novo upload de PDFs", "Carregar coleção existente"), key="modo_doc_radio_v2")
 arquivos_pdf_upload_sidebar = None
 if modo_documento == "Fazer novo upload de PDFs":
-    arquivos_pdf_upload_sidebar = st.sidebar.file_uploader("Selecione um ou mais contratos em PDF", type="pdf", accept_multiple_files=True, key="uploader_sidebar")
+    arquivos_pdf_upload_sidebar = st.sidebar.file_uploader("Selecione um ou mais contratos em PDF", type="pdf", accept_multiple_files=True, key="uploader_sidebar_v2")
     if arquivos_pdf_upload_sidebar:
-        if st.sidebar.button("Processar Documentos Carregados", key="btn_proc_upload_sidebar"):
+        if st.sidebar.button("Processar Documentos Carregados", key="btn_proc_upload_sidebar_v2"):
             if google_api_key and embeddings_global:
-                st.session_state.vector_store, st.session_state.nomes_arquivos = obter_vector_store_de_uploads(arquivos_pdf_upload_sidebar, embeddings_global)
+                with st.spinner("Processando e indexando documentos..."):
+                    st.session_state.vector_store, st.session_state.nomes_arquivos = obter_vector_store_de_uploads(arquivos_pdf_upload_sidebar, embeddings_global)
                 st.session_state.arquivos_pdf_originais = arquivos_pdf_upload_sidebar
                 st.session_state.colecao_ativa = None; st.session_state.messages = []
                 st.session_state.pop('df_dashboard', None); st.session_state.pop('resumo_gerado', None)
                 st.session_state.pop('analise_riscos_resultados', None); st.session_state.pop('eventos_contratuais_df', None)
-                st.session_state.pop('conformidade_resultados', None)
-                st.session_state.pop('anomalias_resultados', None) # Limpa anomalias
+                st.session_state.pop('conformidade_resultados', None); st.session_state.pop('anomalias_resultados', None)
+                st.success("Documentos processados!")
                 st.rerun()
             else: st.sidebar.error("Chave de API ou Embeddings não configurados.")
 elif modo_documento == "Carregar coleção existente":
     colecoes_disponiveis = listar_colecoes_salvas()
     if colecoes_disponiveis:
-        colecao_selecionada = st.sidebar.selectbox("Escolha uma coleção:", colecoes_disponiveis, key="select_colecao_sidebar")
-        if st.sidebar.button("Carregar Coleção Selecionada", key="btn_load_colecao_sidebar"):
+        colecao_selecionada = st.sidebar.selectbox("Escolha uma coleção:", colecoes_disponiveis, key="select_colecao_sidebar_v2")
+        if st.sidebar.button("Carregar Coleção Selecionada", key="btn_load_colecao_sidebar_v2"):
             if google_api_key and embeddings_global:
                 vs, nomes_arqs = carregar_colecao(colecao_selecionada, embeddings_global)
                 if vs and nomes_arqs:
@@ -441,23 +408,22 @@ elif modo_documento == "Carregar coleção existente":
                     st.session_state.arquivos_pdf_originais = None; st.session_state.messages = []
                     st.session_state.pop('df_dashboard', None); st.session_state.pop('resumo_gerado', None)
                     st.session_state.pop('analise_riscos_resultados', None); st.session_state.pop('eventos_contratuais_df', None)
-                    st.session_state.pop('conformidade_resultados', None)
-                    st.session_state.pop('anomalias_resultados', None) # Limpa anomalias
+                    st.session_state.pop('conformidade_resultados', None); st.session_state.pop('anomalias_resultados', None)
                     st.rerun()
             else: st.sidebar.error("Chave de API ou Embeddings não configurados.")
     else: st.sidebar.info("Nenhuma coleção salva ainda.")
 
 if "vector_store" in st.session_state and st.session_state.vector_store is not None and st.session_state.get("arquivos_pdf_originais"):
     st.sidebar.markdown("---"); st.sidebar.subheader("Salvar Coleção Atual")
-    nome_nova_colecao = st.sidebar.text_input("Nome para a nova coleção:", key="input_nome_colecao_sidebar")
-    if st.sidebar.button("Salvar Coleção", key="btn_save_colecao_sidebar"):
+    nome_nova_colecao = st.sidebar.text_input("Nome para a nova coleção:", key="input_nome_colecao_sidebar_v2")
+    if st.sidebar.button("Salvar Coleção", key="btn_save_colecao_sidebar_v2"):
         if nome_nova_colecao and st.session_state.nomes_arquivos: salvar_colecao_atual(nome_nova_colecao, st.session_state.vector_store, st.session_state.nomes_arquivos)
         else: st.sidebar.warning("Dê um nome e certifique-se de que há docs carregados.")
 
 if "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: st.sidebar.markdown(f"**Coleção Ativa:** `{st.session_state.colecao_ativa}`")
 elif "nomes_arquivos" in st.session_state and st.session_state.nomes_arquivos: st.sidebar.markdown(f"**Arquivos Carregados:** {len(st.session_state.nomes_arquivos)}")
 
-st.sidebar.header("Configurações de Idioma"); idioma_selecionado = st.sidebar.selectbox("Idioma para o CHAT:", ("Português", "Inglês", "Espanhol"), key="idioma_chat_key_sidebar")
+st.sidebar.header("Configurações de Idioma"); idioma_selecionado = st.sidebar.selectbox("Idioma para o CHAT:", ("Português", "Inglês", "Espanhol"), key="idioma_chat_key_sidebar_v2")
 
 # --- INICIALIZAÇÃO DO ESTADO DA SESSÃO ---
 if "messages" not in st.session_state: st.session_state.messages = []
@@ -467,7 +433,7 @@ if "df_dashboard" not in st.session_state: st.session_state.df_dashboard = None
 if "analise_riscos_resultados" not in st.session_state: st.session_state.analise_riscos_resultados = {}
 if "eventos_contratuais_df" not in st.session_state: st.session_state.eventos_contratuais_df = None
 if "conformidade_resultados" not in st.session_state: st.session_state.conformidade_resultados = {}
-if "anomalias_resultados" not in st.session_state: st.session_state.anomalias_resultados = [] # Novo estado
+if "anomalias_resultados" not in st.session_state: st.session_state.anomalias_resultados = []
 
 # --- LÓGICA DAS ABAS ---
 tab_chat, tab_dashboard, tab_resumo, tab_riscos, tab_prazos, tab_conformidade, tab_anomalias = st.tabs([
@@ -483,10 +449,9 @@ else:
     arquivos_pdf_originais_global = st.session_state.get("arquivos_pdf_originais")
 
     with tab_chat:
-        # ... (código do chat completo como na versão anterior) ...
         st.header("Converse com seus documentos")
         if not vector_store_global: st.warning("Nenhum documento processado para o chat. Por favor, carregue documentos ou uma coleção.")
-        else: 
+        else:
             template_prompt_chat = PromptTemplate.from_template(
                 """Use os seguintes trechos de contexto para responder à pergunta no final.
                 INSTRUÇÕES DE FORMATAÇÃO DA RESPOSTA: Sua resposta final deve ter duas partes, separadas por '|||'.
@@ -510,9 +475,9 @@ else:
             if st.session_state.messages :
                 chat_exportado_md = formatar_chat_para_markdown(st.session_state.messages)
                 agora = datetime.now().strftime("%Y%m%d_%H%M%S")
-                st.download_button(label="📥 Exportar Conversa",data=chat_exportado_md, file_name=f"conversa_contratos_{agora}.md", mime="text/markdown", key="export_chat_btn_tab")
+                st.download_button(label="📥 Exportar Conversa",data=chat_exportado_md, file_name=f"conversa_contratos_{agora}.md", mime="text/markdown", key="export_chat_btn_tab_v2")
                 st.markdown("---")
-            if prompt := st.chat_input("Faça sua pergunta sobre os contratos..."):
+            if prompt := st.chat_input("Faça sua pergunta sobre os contratos...", key="chat_input_v2"):
                 st.session_state.messages.append({"role": "user", "content": prompt})
                 with st.chat_message("user"): st.markdown(prompt)
                 with st.chat_message("assistant"):
@@ -527,35 +492,32 @@ else:
                         st.rerun()
 
     with tab_dashboard:
-        st.header("Análise Comparativa de Políticas Contratuais")
-        st.markdown("Clique no botão para extrair e comparar as políticas chave dos documentos carregados.")
+        st.header("Análise Comparativa de Dados Contratuais")
+        st.markdown("Clique no botão para extrair e comparar os dados chave dos documentos carregados (conforme definido no schema `InfoContrato`).")
         if not (vector_store_global and nomes_arquivos_global):
             st.warning("Carregue documentos ou uma coleção válida para usar o dashboard.")
         else:
-            if st.button("🚀 Gerar Dados para Dashboard e Anomalias", key="btn_dashboard_e_anomalias_tab"):
-                # Este botão agora vai popular o df_dashboard que será usado por esta aba e pela de anomalias
+            if st.button("🚀 Gerar Dados para Dashboard e Anomalias", key="btn_dashboard_e_anomalias_tab_v2"):
                 dados_extraidos = extrair_dados_dos_contratos(vector_store_global, nomes_arquivos_global)
                 if dados_extraidos: st.session_state.df_dashboard = pd.DataFrame(dados_extraidos)
-                else: st.session_state.df_dashboard = pd.DataFrame() # Cria um DF vazio se nada for extraído
-                st.session_state.pop('anomalias_resultados', None) # Limpa resultados de anomalias anteriores
-            
+                else: st.session_state.df_dashboard = pd.DataFrame()
+                st.session_state.pop('anomalias_resultados', None)
             if 'df_dashboard' in st.session_state and st.session_state.df_dashboard is not None:
                 if not st.session_state.df_dashboard.empty:
                     st.info("Tabela de dados extraídos dos contratos. Use a barra de rolagem horizontal.")
                     st.dataframe(st.session_state.df_dashboard)
-                elif ("btn_dashboard_e_anomalias_tab" in st.session_state and st.session_state.btn_dashboard_e_anomalias_tab): 
+                elif ("btn_dashboard_e_anomalias_tab_v2" in st.session_state and st.session_state.btn_dashboard_e_anomalias_tab_v2):
                     st.warning("Nenhum dado foi extraído para o dashboard.")
-            elif ("btn_dashboard_e_anomalias_tab" in st.session_state and st.session_state.btn_dashboard_e_anomalias_tab and st.session_state.df_dashboard is None) :
+            elif ("btn_dashboard_e_anomalias_tab_v2" in st.session_state and st.session_state.btn_dashboard_e_anomalias_tab_v2 and st.session_state.df_dashboard is None) :
                  st.warning("A extração de dados para o dashboard não retornou resultados ou falhou.")
-    
-    with tab_resumo: # (Mantido como antes)
-        # ...
+
+    with tab_resumo:
         st.header("📜 Resumo Executivo de um Contrato")
         if arquivos_pdf_originais_global:
             lista_nomes_arquivos_resumo = [f.name for f in arquivos_pdf_originais_global]
             if lista_nomes_arquivos_resumo:
-                arquivo_selecionado_nome_resumo = st.selectbox("Escolha um contrato para resumir:", options=lista_nomes_arquivos_resumo, key="select_resumo_tab")
-                if st.button("✍️ Gerar Resumo Executivo", key="btn_resumo_tab"):
+                arquivo_selecionado_nome_resumo = st.selectbox("Escolha um contrato para resumir:", options=lista_nomes_arquivos_resumo, key="select_resumo_tab_v2")
+                if st.button("✍️ Gerar Resumo Executivo", key="btn_resumo_tab_v2"):
                     arquivo_obj_selecionado = next((arq for arq in arquivos_pdf_originais_global if arq.name == arquivo_selecionado_nome_resumo), None)
                     if arquivo_obj_selecionado:
                         resumo = gerar_resumo_executivo(arquivo_obj_selecionado.getvalue(), arquivo_obj_selecionado.name)
@@ -567,13 +529,11 @@ else:
         elif nomes_arquivos_global: st.info("A função de resumo funciona melhor com arquivos recém-carregados.")
         else: st.warning("Carregue documentos para usar a função de resumo.")
 
-
-    with tab_riscos: # (Mantido como antes)
-        # ...
+    with tab_riscos:
         st.header("🚩 Análise de Cláusulas de Risco")
         st.markdown("Analisa os documentos carregados na sessão atual em busca de cláusulas potencialmente arriscadas.")
         if arquivos_pdf_originais_global:
-            if st.button("🔎 Analisar Riscos em Todos os Documentos Carregados", key="btn_analise_riscos"):
+            if st.button("🔎 Analisar Riscos em Todos os Documentos Carregados", key="btn_analise_riscos_v2"):
                 st.session_state.analise_riscos_resultados = {}
                 textos_completos_docs = []
                 for arquivo_pdf_obj in arquivos_pdf_originais_global:
@@ -585,6 +545,7 @@ else:
                     st.info(f"Analisando riscos em: {doc_info['nome']}...")
                     resultado_risco = analisar_documento_para_riscos(doc_info["texto"], doc_info["nome"])
                     resultados_analise[doc_info["nome"]] = resultado_risco
+                    time.sleep(1) # Pequena pausa para não sobrecarregar a API
                 st.session_state.analise_riscos_resultados = resultados_analise
             if st.session_state.analise_riscos_resultados:
                 st.markdown("---")
@@ -593,13 +554,11 @@ else:
         elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: st.warning("A Análise de Riscos detalhada funciona melhor com arquivos recém-carregados.")
         else: st.info("Faça o upload de documentos para ativar a análise de riscos.")
 
-
-    with tab_prazos: # (Mantido como antes)
-        # ...
+    with tab_prazos:
         st.header("🗓️ Monitoramento de Prazos e Vencimentos")
         st.markdown("Extrai e organiza datas e prazos importantes dos documentos carregados na sessão atual.")
         if arquivos_pdf_originais_global:
-            if st.button("🔍 Analisar Prazos e Datas Importantes", key="btn_analise_prazos"):
+            if st.button("🔍 Analisar Prazos e Datas Importantes", key="btn_analise_prazos_v2"):
                 textos_completos_para_datas = []
                 for arquivo_pdf_obj in arquivos_pdf_originais_global:
                     temp_path = Path(f"temp_prazo_{arquivo_pdf_obj.name}")
@@ -634,64 +593,64 @@ else:
                         else: st.info("Nenhuma data válida encontrada para filtrar próximos eventos.")
                     else: st.warning("Coluna 'Data Objeto' não contém datas válidas para filtrar próximos eventos.")
                 else: st.info("Nenhum evento ou prazo foi extraído dos documentos ou a extração falhou.")
-            elif ("btn_analise_prazos" in st.session_state and st.session_state.btn_analise_prazos):
+            elif ("btn_analise_prazos_v2" in st.session_state and st.session_state.btn_analise_prazos_v2):
                  st.warning("A extração de datas não retornou resultados. Verifique os avisos na função de extração.")
         elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: st.warning("O Monitoramento de Prazos funciona melhor com arquivos recém-carregados.")
         else: st.info("Faça o upload de documentos para ativar o monitoramento de prazos.")
 
-    with tab_conformidade: # (Mantido como antes)
-        # ... (código da verificação de conformidade completo)
+    with tab_conformidade:
         st.header("⚖️ Verificador de Conformidade Contratual")
         st.markdown("Compare um documento com um documento de referência para identificar desalinhamentos.")
-        if arquivos_pdf_originais_global and len(arquivos_pdf_originais_global) >= 1:
+        if arquivos_pdf_originais_global and len(arquivos_pdf_originais_global) >= 1: # Precisa de pelo menos 1 para ser referência, idealmente 2.
             nomes_arquivos_para_selecao = [f.name for f in arquivos_pdf_originais_global]
-            col_ref, col_ana = st.columns(2)
-            with col_ref:
-                doc_referencia_nome = st.selectbox("1. Documento de Referência:", options=nomes_arquivos_para_selecao, key="select_doc_ref_conf")
+            col_ref_conf, col_ana_conf = st.columns(2)
+            with col_ref_conf:
+                doc_referencia_nome = st.selectbox("1. Documento de Referência:", options=nomes_arquivos_para_selecao, key="select_doc_ref_conf_v2")
             opcoes_docs_analisar = [n for n in nomes_arquivos_para_selecao if n != doc_referencia_nome]
-            if opcoes_docs_analisar:
-                with col_ana:
-                    docs_a_analisar_nomes = st.multiselect("2. Documento(s) a Analisar:", options=opcoes_docs_analisar, key="multiselect_docs_ana_conf")
-            else: st.warning("Carregue pelo menos dois documentos para comparação.")
+            if not opcoes_docs_analisar and len(arquivos_pdf_originais_global) > 1 :
+                 st.warning("Selecione um documento de referência diferente para habilitar a análise.")
+            elif not opcoes_docs_analisar and len(arquivos_pdf_originais_global) <= 1:
+                 st.warning("Carregue pelo menos dois documentos para fazer uma comparação.")
 
-            if st.button("🔎 Verificar Conformidade", key="btn_ver_conf") and doc_referencia_nome and docs_a_analisar_nomes:
-                st.session_state.conformidade_resultados = {}
-                doc_referencia_obj = next((arq for arq in arquivos_pdf_originais_global if arq.name == doc_referencia_nome), None)
-                texto_doc_referencia = ""
-                if doc_referencia_obj:
-                    temp_path_ref = Path(f"temp_conf_ref_{doc_referencia_obj.name}")
-                    with open(temp_path_ref, "wb") as f: f.write(doc_referencia_obj.getbuffer())
-                    loader_ref = PyPDFLoader(str(temp_path_ref)); texto_doc_referencia = "\n\n".join([page.page_content for page in loader_ref.load()]); os.remove(temp_path_ref)
-                if not texto_doc_referencia: st.error(f"Não foi possível ler: {doc_referencia_nome}")
-                else:
-                    for nome_doc_analisar in docs_a_analisar_nomes:
-                        doc_analisar_obj = next((arq for arq in arquivos_pdf_originais_global if arq.name == nome_doc_analisar), None)
-                        if doc_analisar_obj:
-                            temp_path_ana = Path(f"temp_conf_ana_{doc_analisar_obj.name}")
-                            with open(temp_path_ana, "wb") as f: f.write(doc_analisar_obj.getbuffer())
-                            loader_ana = PyPDFLoader(str(temp_path_ana)); texto_doc_analisar = "\n\n".join([page.page_content for page in loader_ana.load()]); os.remove(temp_path_ana)
-                            if texto_doc_analisar:
-                                st.info(f"Analisando conformidade de '{nome_doc_analisar}' vs '{doc_referencia_nome}'...")
-                                resultado_conformidade = verificar_conformidade_documento(texto_doc_referencia, doc_referencia_nome, texto_doc_analisar, nome_doc_analisar)
-                                st.session_state.conformidade_resultados[f"{nome_doc_analisar}_vs_{doc_referencia_nome}"] = resultado_conformidade
-                            else: st.error(f"Não foi possível ler: {nome_doc_analisar}")
-                        else: st.error(f"Objeto do arquivo '{nome_doc_analisar}' não encontrado.")
+            if opcoes_docs_analisar:
+                with col_ana_conf:
+                    docs_a_analisar_nomes = st.multiselect("2. Documento(s) a Analisar:", options=opcoes_docs_analisar, key="multiselect_docs_ana_conf_v2")
+                if st.button("🔎 Verificar Conformidade", key="btn_ver_conf_v2") and doc_referencia_nome and docs_a_analisar_nomes:
+                    st.session_state.conformidade_resultados = {}
+                    doc_referencia_obj = next((arq for arq in arquivos_pdf_originais_global if arq.name == doc_referencia_nome), None)
+                    texto_doc_referencia = ""
+                    if doc_referencia_obj:
+                        temp_path_ref = Path(f"temp_conf_ref_{doc_referencia_obj.name}")
+                        with open(temp_path_ref, "wb") as f: f.write(doc_referencia_obj.getbuffer())
+                        loader_ref = PyPDFLoader(str(temp_path_ref)); texto_doc_referencia = "\n\n".join([page.page_content for page in loader_ref.load()]); os.remove(temp_path_ref)
+                    if not texto_doc_referencia: st.error(f"Não foi possível ler: {doc_referencia_nome}")
+                    else:
+                        for nome_doc_analisar in docs_a_analisar_nomes:
+                            doc_analisar_obj = next((arq for arq in arquivos_pdf_originais_global if arq.name == nome_doc_analisar), None)
+                            if doc_analisar_obj:
+                                temp_path_ana = Path(f"temp_conf_ana_{doc_analisar_obj.name}")
+                                with open(temp_path_ana, "wb") as f: f.write(doc_analisar_obj.getbuffer())
+                                loader_ana = PyPDFLoader(str(temp_path_ana)); texto_doc_analisar = "\n\n".join([page.page_content for page in loader_ana.load()]); os.remove(temp_path_ana)
+                                if texto_doc_analisar:
+                                    st.info(f"Analisando conformidade de '{nome_doc_analisar}' vs '{doc_referencia_nome}'...")
+                                    resultado_conformidade = verificar_conformidade_documento(texto_doc_referencia, doc_referencia_nome, texto_doc_analisar, nome_doc_analisar)
+                                    st.session_state.conformidade_resultados[f"{nome_doc_analisar}_vs_{doc_referencia_nome}"] = resultado_conformidade
+                                    time.sleep(2) # Pausa para API
+                                else: st.error(f"Não foi possível ler: {nome_doc_analisar}")
+                            else: st.error(f"Objeto do arquivo '{nome_doc_analisar}' não encontrado.")
             if st.session_state.conformidade_resultados:
                 st.markdown("---")
                 for chave_analise, relatorio in st.session_state.conformidade_resultados.items():
                     with st.expander(f"Relatório: {chave_analise.replace('_vs_', ' vs ')}", expanded=True): st.markdown(relatorio)
-        elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa:
-            st.warning("A Verificação de Conformidade funciona melhor com arquivos recém-carregados.")
-        else:
-            st.info("Faça o upload de documentos para ativar a verificação de conformidade.")
-            
+        elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: st.warning("A Verificação de Conformidade funciona melhor com arquivos recém-carregados.")
+        else: st.info("Faça o upload de documentos para ativar a verificação de conformidade.")
+    
     # --- NOVA ABA DE DETECÇÃO DE ANOMALIAS ---
     with tab_anomalias:
         st.header("📊 Detecção de Anomalias Contratuais")
         st.markdown("Identifica dados que fogem do padrão no conjunto de contratos carregados. "
-                    "**Nota:** Esta funcionalidade depende da qualidade e consistência da extração de dados do 'Dashboard Analítico'.")
+                    "**Nota:** Esta funcionalidade depende da qualidade e consistência da extração de dados realizada na aba 'Dashboard Analítico'.")
 
-        # Verifica se o df_dashboard existe e foi populado
         df_para_anomalias = st.session_state.get("df_dashboard")
 
         if df_para_anomalias is None or df_para_anomalias.empty:
@@ -700,8 +659,8 @@ else:
                        "'🚀 Gerar Dados para Dashboard e Anomalias' primeiro.")
         else:
             st.info("Analisando os dados extraídos da aba 'Dashboard Analítico' em busca de anomalias.")
-            if st.button("🚨 Detectar Anomalias Agora", key="btn_detectar_anomalias"):
-                st.session_state.anomalias_resultados = detectar_anomalias_no_dataframe(df_para_anomalias.copy()) # Passa uma cópia
+            if st.button("🚨 Detectar Anomalias Agora", key="btn_detectar_anomalias_v2"):
+                st.session_state.anomalias_resultados = detectar_anomalias_no_dataframe(df_para_anomalias.copy())
             
             if st.session_state.get("anomalias_resultados"):
                 st.subheader("Resultados da Detecção de Anomalias:")
