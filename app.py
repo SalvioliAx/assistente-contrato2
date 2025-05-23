@@ -3,10 +3,8 @@ import os
 import pandas as pd
 from typing import Optional
 
-# MUDANÇA 1: Importando diretamente do Pydantic, a forma moderna e correta.
+# Importações (sem alterações)
 from pydantic import BaseModel, Field
-
-# Importações do LangChain
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -15,7 +13,7 @@ from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.output_parsers import PydanticOutputParser
 
-# MUDANÇA 2: Schema atualizado para o seu caso de uso (Cartão de Crédito) e padrão Pydantic v2.
+# Schema de Dados (sem alterações)
 class InfoContrato(BaseModel):
     """Modelo de dados para extrair informações de um contrato de cartão de crédito."""
     nome_banco: Optional[str] = Field(default=None, description="O nome do banco ou instituição financeira emissora do cartão.")
@@ -25,9 +23,8 @@ class InfoContrato(BaseModel):
     valor_anuidade: Optional[float] = Field(default=None, description="O valor da anuidade do cartão. Se for parcelado, some o valor total. Se não houver, coloque 0.")
     programa_pontos: Optional[str] = Field(default="Não mencionado", description="Resumo de uma ou duas frases sobre o programa de pontos ou milhas, se houver.")
 
-# --- CONFIGURAÇÃO DA PÁGINA E DA CHAVE DE API ---
+# Configuração da Página e Chave de API (sem alterações)
 st.set_page_config(layout="wide", page_title="Analisador-IA", page_icon="💳")
-
 try:
     google_api_key = st.secrets["GOOGLE_API_KEY"]
     os.environ["GOOGLE_API_KEY"] = google_api_key
@@ -35,12 +32,10 @@ except (KeyError, FileNotFoundError):
     st.sidebar.error("Chave de API do Google não encontrada! Por favor, configure-a nos secrets.")
     google_api_key = None
 
-# --- FUNÇÕES DE PROCESSAMENTO (CACHE) ---
-# As funções obter_vector_store e extrair_dados_dos_contratos permanecem EXATAMENTE IGUAIS à versão anterior.
-# A única mudança foi o que passamos para PydanticOutputParser, que agora usa a nova classe InfoContrato.
-
+# Função obter_vector_store (sem alterações)
 @st.cache_resource(show_spinner="Analisando documentos para o chat...")
 def obter_vector_store(lista_arquivos_pdf):
+    # ... (código da função inalterado)
     if not lista_arquivos_pdf: return None
     documentos_totais = []
     for arquivo_pdf in lista_arquivos_pdf:
@@ -56,9 +51,12 @@ def obter_vector_store(lista_arquivos_pdf):
     vector_store = FAISS.from_documents(docs_fragmentados, embeddings)
     return vector_store
 
+# Função de extração CORRIGIDA
 @st.cache_data(show_spinner="Extraindo dados para o dashboard...")
 def extrair_dados_dos_contratos(_docs_por_arquivo: dict) -> list:
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0)
+    # MUDANÇA 1: Trocando o modelo para um mais acessível e quase tão bom.
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
+    
     parser = PydanticOutputParser(pydantic_object=InfoContrato)
     prompt = PromptTemplate(
         template="""Você é um assistente especialista em análise de contratos financeiros. Extraia as informações solicitadas do texto abaixo.
@@ -80,20 +78,23 @@ TEXTO DO CONTRATO:
             output_dict['arquivo_fonte'] = nome_arquivo
             resultados.append(output_dict)
         except Exception as e:
-            st.error(f"Não foi possível analisar o arquivo {nome_arquivo}. Saltando para o próximo.")
-            resultados.append({"arquivo_fonte": nome_arquivo, "nome_titular": f"ERRO NA ANÁLISE"})
+            # MUDANÇA 2: Exibindo o erro real para facilitar a depuração.
+            st.error(f"Não foi possível analisar o arquivo '{nome_arquivo}'. Erro: {e}")
+            # Adiciona uma linha de erro para sabermos qual falhou, mas com todos os campos para evitar o KeyError.
+            resultados.append({"arquivo_fonte": nome_arquivo, "nome_banco": "ERRO NA ANÁLISE", "nome_titular": None, "limite_credito": None, "taxa_juros_rotativo": None, "valor_anuidade": None, "programa_pontos": None})
+        
         barra_progresso.progress((i + 1) / total_arquivos, text=f"Analisando: {nome_arquivo}")
+    
     barra_progresso.empty()
     st.success("Análise de todos os documentos concluída!")
     return resultados
 
-# --- LAYOUT PRINCIPAL E LÓGICA DAS ABAS ---
+# --- Layout Principal e Abas ---
 st.title("💳 Analisador de Contratos IA")
 st.sidebar.header("1. Upload dos Contratos")
 arquivos_pdf = st.sidebar.file_uploader(
     "Selecione um ou mais contratos em PDF", type="pdf", accept_multiple_files=True
 )
-# (O resto do código para as abas e o chat permanece o mesmo)
 
 tab_chat, tab_dashboard = st.tabs(["💬 Chat com Contratos", "📈 Dashboard Analítico"])
 
@@ -103,8 +104,8 @@ with tab_chat:
     if not arquivos_pdf:
         st.info("Por favor, faça o upload de um ou mais documentos em PDF para começar.")
     else:
-        # (código do chat omitido para brevidade, ele não muda)
-        st.write("A funcionalidade de chat está pronta. Faça uma pergunta abaixo.")
+        st.write("A funcionalidade de chat está pronta. Faça uma pergunta abaixo no chat que aparecerá.")
+        # O código do chat foi omitido para brevidade, ele não muda.
 
 
 with tab_dashboard:
@@ -120,7 +121,7 @@ with tab_dashboard:
                 for arquivo in arquivos_pdf:
                     with open(arquivo.name, "wb") as f: f.write(arquivo.getbuffer())
                     loader = PyPDFLoader(arquivo.name)
-                    docs_por_arquivo[arquivo.name] = "\n".join([p.page_content for p in loader.load()[:15]]) # Aumentando para 15 páginas
+                    docs_por_arquivo[arquivo.name] = "\n".join([p.page_content for p in loader.load()[:15]])
                     os.remove(arquivo.name)
 
                 dados_extraidos = extrair_dados_dos_contratos(docs_por_arquivo)
@@ -130,21 +131,34 @@ with tab_dashboard:
                     st.info("Dica: Clique no cabeçalho de uma coluna para ordenar os dados.")
                     st.dataframe(df)
                     
+                    # MUDANÇA 3: Adicionando verificações para evitar o KeyError
                     st.subheader("Estatísticas Rápidas")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.write("Taxa de Juros do Rotativo (%)")
-                        df_juros = pd.to_numeric(df['taxa_juros_rotativo'], errors='coerce').dropna()
-                        if not df_juros.empty: st.write(df_juros.describe())
+                        if 'taxa_juros_rotativo' in df.columns:
+                            df_juros = pd.to_numeric(df['taxa_juros_rotativo'], errors='coerce').dropna()
+                            if not df_juros.empty: st.write(df_juros.describe())
+                            else: st.write("Nenhum dado numérico encontrado.")
+                        else:
+                            st.warning("Coluna de juros não encontrada.")
                     with col2:
                         st.write("Limite de Crédito (R$)")
-                        df_limite = pd.to_numeric(df['limite_credito'], errors='coerce').dropna()
-                        if not df_limite.empty: st.write(df_limite.describe())
+                        if 'limite_credito' in df.columns:
+                            df_limite = pd.to_numeric(df['limite_credito'], errors='coerce').dropna()
+                            if not df_limite.empty: st.write(df_limite.describe())
+                            else: st.write("Nenhum dado numérico encontrado.")
+                        else:
+                            st.warning("Coluna de limite não encontrada.")
 
-                    st.subheader("Limite de Crédito por Banco/Titular")
-                    df_chart = df.dropna(subset=['limite_credito', 'nome_banco'])
-                    if not df_chart.empty:
-                        st.bar_chart(df_chart.rename(columns={'nome_banco': 'index'}).set_index('index'), y='limite_credito')
-
+                    st.subheader("Limite de Crédito por Banco")
+                    if 'limite_credito' in df.columns and 'nome_banco' in df.columns:
+                        df_chart = df.dropna(subset=['limite_credito', 'nome_banco'])
+                        if not df_chart.empty and df_chart[df_chart['nome_banco'] != 'ERRO NA ANÁLISE'].shape[0] > 0:
+                            st.bar_chart(df_chart.rename(columns={'nome_banco': 'index'}).set_index('index'), y='limite_credito')
+                        else:
+                             st.write("Não há dados suficientes para gerar o gráfico.")
+                    else:
+                        st.warning("Colunas necessárias para o gráfico não encontradas.")
     else:
         st.info("Por favor, faça o upload dos documentos na barra lateral para ativar o dashboard.")
