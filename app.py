@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from typing import Optional, List
 import re
-from datetime import datetime, date # Adicionado 'date'
+from datetime import datetime, date 
 import json
 from pathlib import Path
 
@@ -15,7 +15,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA, LLMChain
 from langchain.prompts import PromptTemplate
-from langchain.output_parsers import PydanticOutputParser, RetryWithErrorOutputParser 
+from langchain.output_parsers import PydanticOutputParser, OutputFixingParser # OutputFixingParser é mais simples que RetryWithError
 
 # --- DEFINIÇÕES GLOBAIS ---
 COLECOES_DIR = Path("colecoes_ia")
@@ -32,7 +32,8 @@ class InfoContrato(BaseModel):
 
 class EventoContratual(BaseModel):
     descricao_evento: str = Field(description="Uma descrição clara e concisa do evento ou prazo. Ex: 'Vencimento do contrato', 'Data de assinatura', 'Prazo para pagamento da fatura'.")
-    data_evento_str: Optional[str] = Field(default="Não especificado", description="A data do evento no formato YYYY-MM-DD. Se for um prazo condicional ou não específico, indique como 'Condicional' ou 'Vide Fatura'.")
+    # Mantemos Optional, mas o prompt será mais forte
+    data_evento_str: Optional[str] = Field(default="Não Especificado", description="A data do evento no formato YYYY-MM-DD. Se uma data EXATA não puder ser determinada ou não se aplicar, use a string 'Não Especificado'. NUNCA use null ou deixe vazio.")
     trecho_relevante: Optional[str] = Field(default=None, description="O trecho exato do contrato que menciona este evento/data.")
 
 class ListaDeEventos(BaseModel):
@@ -165,15 +166,19 @@ def analisar_documento_para_riscos(texto_completo_doc, nome_arquivo_doc):
     try: resultado = chain_riscos.invoke({"nome_arquivo": nome_arquivo_doc, "texto_contrato": texto_completo_doc}); return resultado['text']
     except Exception as e: return f"Erro ao analisar riscos para '{nome_arquivo_doc}': {e}"
 
+# MUDANÇA PRINCIPAL: Ajustes na extração de eventos
 @st.cache_data(show_spinner="Extraindo datas e prazos dos contratos...")
 def extrair_eventos_dos_contratos(textos_completos_docs: List[dict]) -> List[dict]:
     if not textos_completos_docs or not google_api_key: return []
-    llm_eventos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0, request_timeout=120)
+    
+    llm_eventos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
     parser = PydanticOutputParser(pydantic_object=ListaDeEventos)
+    
+    # Prompt ajustado para ser mais explícito sobre o output para datas não encontradas/condicionais
     prompt_eventos_template_str = """Analise o texto do contrato abaixo. Sua tarefa é identificar TODOS os eventos, datas, prazos e períodos importantes mencionados.
 Para cada evento encontrado, extraia as seguintes informações:
 1.  'descricao_evento': Uma descrição clara e concisa do evento (ex: 'Data de assinatura do contrato', 'Vencimento da primeira parcela', 'Prazo final para entrega do produto', 'Início da vigência', 'Período de carência para alteração de vencimento').
-2.  'data_evento_str': A data específica do evento no formato YYYY-MM-DD. Se uma data EXATA não puder ser determinada a partir do texto (ex: '10 dias antes do vencimento', 'prazo indeterminado', 'na fatura mensal'), preencha este campo com a string 'Não especificado' ou 'Condicional'. NÃO deixe este campo NULO ou VAZIO.
+2.  'data_evento_str': A data específica do evento no formato YYYY-MM-DD. Se uma data EXATA não puder ser determinada ou não se aplicar (ex: '10 dias antes do vencimento', 'prazo indeterminado', 'na fatura mensal'), preencha este campo OBRIGATORIAMENTE com a string 'Não Especificado'. NUNCA use null, None ou deixe o campo vazio.
 3.  'trecho_relevante': O trecho curto e exato do contrato que menciona este evento/data.
 
 {format_instructions}
@@ -181,29 +186,44 @@ Para cada evento encontrado, extraia as seguintes informações:
 TEXTO DO CONTRATO ({arquivo_fonte}):
 {texto_contrato}
 
-ATENÇÃO: Certifique-se de que o campo 'data_evento_str' sempre contenha um valor textual, mesmo que seja 'Não especificado' ou 'Condicional'.
-LISTA DE EVENTOS ENCONTRADOS:"""
+ATENÇÃO: O campo 'data_evento_str' DEVE SEMPRE ser uma string. Se não houver data específica, use 'Não Especificado'.
+LISTA DE EVENTOS ENCONTRADOS:
+"""
+    
     prompt_eventos = PromptTemplate(
         template=prompt_eventos_template_str,
         input_variables=["texto_contrato", "arquivo_fonte"],
         partial_variables={"format_instructions": parser.get_format_instructions().replace("```json", "").replace("```", "").strip()}
     )
-    chain_eventos = prompt_eventos | llm_eventos | parser
+    
+    # Usando o OutputFixingParser como uma tentativa de correção mais simples se o PydanticOutputParser falhar
+    output_fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1))
+    
+    chain_eventos = prompt_eventos | llm_eventos # Primeiro, obtemos a resposta crua da IA
+
     todos_os_eventos_formatados = []
     barra_progresso = st.progress(0, text="Iniciando extração de datas...")
+
     for i, doc_info in enumerate(textos_completos_docs):
-        nome_arquivo, texto_contrato = doc_info["nome"], doc_info["texto"]
+        nome_arquivo = doc_info["nome"]
+        texto_contrato = doc_info["texto"]
         barra_progresso.progress((i + 1) / len(textos_completos_docs), text=f"Analisando datas em: {nome_arquivo}")
+        
         try:
-            retry_parser = RetryWithErrorOutputParser.from_llm(parser=parser, llm=ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1))
+            # Etapa 1: Obter a resposta da IA como string
+            resposta_ia_str = chain_eventos.invoke({
+                "texto_contrato": texto_contrato,
+                "arquivo_fonte": nome_arquivo
+            })['text'] # A LLMChain retorna um dicionário com a chave 'text'
+
+            # Etapa 2: Tentar parsear com o PydanticOutputParser
             try:
-                resultado_parseado = chain_eventos.invoke({"texto_contrato": texto_contrato, "arquivo_fonte": nome_arquivo})
-            except Exception as e_parse_initial:
-                st.write(f"Parser inicial falhou para {nome_arquivo}, tentando com retry parser. Erro: {e_parse_initial}")
-                resultado_parseado = retry_parser.parse_with_prompt(
-                    llm_eventos.invoke(prompt_eventos.format_prompt(texto_contrato=texto_contrato, arquivo_fonte=nome_arquivo)).content, 
-                    prompt_eventos.format_prompt(texto_contrato=texto_contrato, arquivo_fonte=nome_arquivo)
-                )
+                resultado_parseado = parser.parse(resposta_ia_str)
+            except Exception as e_parse: # Se falhar, tenta o OutputFixingParser
+                st.write(f"Parser Pydantic inicial falhou para {nome_arquivo}, tentando com OutputFixingParser. Erro: {e_parse}")
+                st.write(f"Resposta da IA que causou o erro: {resposta_ia_str[:500]}...") # Log da resposta
+                resultado_parseado = output_fixing_parser.parse(resposta_ia_str)
+            
             if resultado_parseado and isinstance(resultado_parseado, ListaDeEventos):
                 for evento in resultado_parseado.eventos:
                     data_obj = None
@@ -212,15 +232,21 @@ LISTA DE EVENTOS ENCONTRADOS:"""
                         except ValueError:
                             try: data_obj = datetime.strptime(evento.data_evento_str, "%d/%m/%Y").date()
                             except ValueError: pass
+                    
                     todos_os_eventos_formatados.append({
-                        "Arquivo Fonte": nome_arquivo, "Evento": evento.descricao_evento,
-                        "Data Informada": evento.data_evento_str, "Data Objeto": data_obj,
-                        "Trecho Relevante": evento.trecho_relevante})
+                        "Arquivo Fonte": nome_arquivo,
+                        "Evento": evento.descricao_evento,
+                        "Data Informada": evento.data_evento_str,
+                        "Data Objeto": data_obj, 
+                        "Trecho Relevante": evento.trecho_relevante
+                    })
         except Exception as e_main:
-            st.warning(f"Erro significativo ao processar datas para '{nome_arquivo}'. Erro: {e_main}")
+            st.warning(f"Erro crítico ao processar datas para '{nome_arquivo}'. Erro: {e_main}")
             todos_os_eventos_formatados.append({
                 "Arquivo Fonte": nome_arquivo, "Evento": f"Falha na extração: {e_main}", 
-                "Data Informada": "Erro", "Data Objeto": None, "Trecho Relevante": None})
+                "Data Informada": "Erro", "Data Objeto": None, "Trecho Relevante": None
+            })
+            
     barra_progresso.empty()
     if not todos_os_eventos_formatados: st.info("Nenhum evento ou prazo foi extraído dos documentos.")
     else: st.success("Extração de datas e prazos concluída!")
@@ -307,14 +333,16 @@ if "eventos_contratuais_df" not in st.session_state: st.session_state.eventos_co
 tab_chat, tab_dashboard, tab_resumo, tab_riscos, tab_prazos = st.tabs(["💬 Chat", "📈 Dashboard", "📜 Resumo", "🚩 Riscos", "🗓️ Prazos"])
 documentos_prontos = google_api_key and embeddings_global and (st.session_state.get("vector_store") or st.session_state.get("arquivos_pdf_originais"))
 
-if documentos_prontos:
+if not documentos_prontos:
+    st.warning("Por favor, configure sua Chave de API do Google na barra lateral e carregue documentos para habilitar as funcionalidades.")
+else:
     vector_store_global = st.session_state.get("vector_store")
     nomes_arquivos_global = st.session_state.get("nomes_arquivos", [])
     arquivos_pdf_originais_global = st.session_state.get("arquivos_pdf_originais")
 
     with tab_chat:
         st.header("Converse com seus documentos")
-        if not vector_store_global: st.warning("O motor de busca de documentos não está pronto.")
+        if not vector_store_global: st.warning("Nenhum documento processado para o chat. Por favor, carregue documentos ou uma coleção.")
         else: 
             template_prompt_chat = PromptTemplate.from_template(
                 """Use os seguintes trechos de contexto para responder à pergunta no final.
@@ -414,7 +442,6 @@ if documentos_prontos:
         elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: st.warning("A Análise de Riscos detalhada funciona melhor com arquivos recém-carregados.")
         else: st.info("Faça o upload de documentos para ativar a análise de riscos.")
 
-    # --- ABA DE PRAZOS E VENCIMENTOS (COM CORREÇÃO PARA TypeError) ---
     with tab_prazos:
         st.header("🗓️ Monitoramento de Prazos e Vencimentos")
         st.markdown("Extrai e organiza datas e prazos importantes dos documentos carregados na sessão atual.")
@@ -430,22 +457,18 @@ if documentos_prontos:
                 eventos_extraidos = extrair_eventos_dos_contratos(textos_completos_para_datas)
                 if eventos_extraidos:
                     df_eventos = pd.DataFrame(eventos_extraidos)
-                    # Converte 'Data Objeto' para datetime, o que lida com NaT para ordenação
                     df_eventos['Data Objeto'] = pd.to_datetime(df_eventos['Data Objeto'], errors='coerce')
                     st.session_state.eventos_contratuais_df = df_eventos.sort_values(by="Data Objeto", ascending=True, na_position='last')
                 else:
-                    st.session_state.eventos_contratuais_df = pd.DataFrame() # Cria DF vazio
+                    st.session_state.eventos_contratuais_df = pd.DataFrame()
             
             if 'eventos_contratuais_df' in st.session_state and st.session_state.eventos_contratuais_df is not None:
                 df_display = st.session_state.eventos_contratuais_df.copy()
                 if not df_display.empty:
-                    # Cria a coluna Data Formatada apenas se Data Objeto existir e não for tudo NaT
                     if 'Data Objeto' in df_display.columns and df_display['Data Objeto'].notna().any():
                          df_display['Data Formatada'] = df_display['Data Objeto'].dt.strftime('%d/%m/%Y').fillna('N/A')
                     else:
                         df_display['Data Formatada'] = df_display.get('Data Informada', pd.Series(['N/A'] * len(df_display)))
-
-
                     st.subheader("Todos os Eventos e Prazos Identificados")
                     colunas_para_exibir_eventos = ['Arquivo Fonte', 'Evento', 'Data Informada', 'Data Formatada', 'Trecho Relevante']
                     colunas_existentes_eventos = [col for col in colunas_para_exibir_eventos if col in df_display.columns]
@@ -453,11 +476,8 @@ if documentos_prontos:
 
                     if 'Data Objeto' in df_display.columns and df_display['Data Objeto'].notna().any():
                         st.subheader("Próximos Eventos (Próximos 90 dias)")
-                        hoje_datetime = datetime.now() # datetime para comparação com Timedelta
-                        
-                        # MUDANÇA PRINCIPAL AQUI: Convertendo 'Data Objeto' para datetime se não for NaT
+                        hoje_datetime = datetime.now()
                         df_display_com_datetime = df_display[df_display['Data Objeto'].notna()].copy()
-                        
                         if not df_display_com_datetime.empty:
                             proximos_eventos = df_display_com_datetime[
                                 (df_display_com_datetime['Data Objeto'] >= hoje_datetime) &
@@ -465,16 +485,12 @@ if documentos_prontos:
                             ]
                             if not proximos_eventos.empty:
                                 st.table(proximos_eventos[['Arquivo Fonte', 'Evento', 'Data Formatada']])
-                            else:
-                                st.info("Nenhum evento encontrado para os próximos 90 dias.")
-                        else:
-                            st.info("Nenhuma data válida encontrada para filtrar próximos eventos.")
-                    else:
-                        st.warning("Coluna 'Data Objeto' não contém datas válidas para filtrar próximos eventos.")
-                else:
-                    st.info("Nenhum evento ou prazo foi extraído dos documentos ou a extração falhou.")
+                            else: st.info("Nenhum evento encontrado para os próximos 90 dias.")
+                        else: st.info("Nenhuma data válida encontrada para filtrar próximos eventos.")
+                    else: st.warning("Coluna 'Data Objeto' não contém datas válidas para filtrar próximos eventos.")
+                else: st.info("Nenhum evento ou prazo foi extraído dos documentos ou a extração falhou.")
             elif "btn_analise_prazos" in st.session_state and st.session_state.btn_analise_prazos:
-                 st.warning("A extração de datas não retornou resultados. Verifique os avisos ou os documentos.")
+                 st.warning("A extração de datas não retornou resultados. Verifique os avisos acima.")
         elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa:
             st.warning("O Monitoramento de Prazos funciona melhor com arquivos recém-carregados.")
         else:
