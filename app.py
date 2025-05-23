@@ -9,7 +9,7 @@ from langchain.prompts import PromptTemplate
 
 # --- CONFIGURAÇÃO DA PÁGINA E DA CHAVE DE API ---
 
-st.set_page_config(layout="wide", page_title="Contrat-IA", page_icon="📄")
+st.set_page_config(layout="wide", page_title="Contrat-IA", page_icon="📚")
 
 try:
     google_api_key = st.secrets["GOOGLE_API_KEY"]
@@ -25,37 +25,53 @@ footer {visibility: hidden;}
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 
-# --- FUNÇÕES DO MOTOR DE IA (LÓGICA DO BACKEND) ---
+# --- FUNÇÃO ATUALIZADA PARA MÚLTIPLOS DOCUMENTOS ---
 
-@st.cache_resource(show_spinner="Analisando documento... Por favor, aguarde.")
-def obter_vector_store(arquivo_pdf_bytes, google_api_key):
+@st.cache_resource(show_spinner="Analisando documentos... Isso pode levar um tempo.")
+def obter_vector_store(lista_arquivos_pdf, google_api_key):
     """
-    Função que agora SÓ processa o PDF e retorna o banco de dados vetorial.
-    A cadeia de QA será criada depois, com o idioma selecionado.
+    Função que agora processa uma LISTA de arquivos PDF e os unifica.
     """
     if not google_api_key:
         st.error("Chave de API do Google não fornecida!")
         return None
+    if not lista_arquivos_pdf:
+        return None
 
     os.environ["GOOGLE_API_KEY"] = google_api_key
     
-    with open("temp.pdf", "wb") as f:
-        f.write(arquivo_pdf_bytes)
+    documentos_totais = []
+    # Itera sobre cada arquivo PDF carregado
+    for arquivo_pdf in lista_arquivos_pdf:
+        # Salva o arquivo temporariamente para ser lido pelo PyPDFLoader
+        with open(arquivo_pdf.name, "wb") as f:
+            f.write(arquivo_pdf.getbuffer())
+        
+        loader = PyPDFLoader(arquivo_pdf.name)
+        pages = loader.load()
 
-    loader = PyPDFLoader("temp.pdf")
-    pages = loader.load_and_split()
+        # Adiciona a informação de origem (nome do arquivo) a cada página
+        for page in pages:
+            page.metadata["source"] = arquivo_pdf.name
+        
+        documentos_totais.extend(pages)
+        os.remove(arquivo_pdf.name) # Limpa o arquivo temporário
+
+    # Fragmenta todos os documentos de uma vez
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=150)
-    docs = text_splitter.split_documents(pages)
+    docs_fragmentados = text_splitter.split_documents(documentos_totais)
+
+    # Cria os embeddings e o banco de dados vetorial unificado
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    vector_store = FAISS.from_documents(docs, embeddings)
+    vector_store = FAISS.from_documents(docs_fragmentados, embeddings)
     
     return vector_store
 
-# --- NOSSO NOVO TEMPLATE DE PROMPT MULTILÍNGUE ---
+# --- TEMPLATE DE PROMPT (sem alterações) ---
 template_prompt = """
 Use os seguintes trechos de contexto para responder à pergunta no final.
 Se você não sabe a resposta, apenas diga que não sabe, não tente inventar uma resposta.
-Responda de forma completa e detalhada.
+Responda de forma completa e detalhada, citando de qual fonte (documento) a informação foi retirada, se possível.
 
 CONTEXTO: {context}
 
@@ -65,80 +81,76 @@ INSTRUÇÃO FINAL: Responda a pergunta acima estritamente no seguinte idioma: {l
 RESPOSTA PRESTATIVA:
 """
 
-# --- LAYOUT DA INTERFACE (O QUE O USUÁRIO VÊ) ---
+# --- LAYOUT DA INTERFACE ---
 
-st.title("📄 Contrat-IA: Converse com seus Contratos")
-st.markdown("Faça o upload de um contrato em PDF e faça perguntas sobre ele em linguagem natural.")
+st.title("📚 Contrat-IA: Sua Base de Conhecimento Editorial")
+st.markdown("Faça o upload de múltiplos contratos e faça perguntas que cruzam informações entre eles.")
 
 # --- BARRA LATERAL (SIDEBAR) ---
-st.sidebar.header("1. Upload do Contrato")
-arquivo_pdf = st.sidebar.file_uploader("Selecione o arquivo PDF", type="pdf")
+st.sidebar.header("1. Upload dos Contratos")
+arquivos_pdf = st.sidebar.file_uploader(
+    "Selecione um ou mais contratos em PDF",
+    type="pdf",
+    accept_multiple_files=True  # <-- A GRANDE MUDANÇA AQUI
+)
 
 st.sidebar.header("2. Configurações")
 idioma_selecionado = st.sidebar.selectbox(
     "Selecione o idioma da resposta:",
-    ("Português", "Inglês", "Espanhol", "Francês", "Alemão")
+    ("Português", "Inglês", "Espanhol", "Francês")
 )
 
 # --- LÓGICA PRINCIPAL DA APLICAÇÃO ---
-if arquivo_pdf:
-    if "vector_store" not in st.session_state or st.session_state.get("nome_arquivo") != arquivo_pdf.name:
-        st.session_state.nome_arquivo = arquivo_pdf.name
-        arquivo_pdf_bytes = arquivo_pdf.getvalue()
-        st.session_state.vector_store = obter_vector_store(arquivo_pdf_bytes, google_api_key)
+if arquivos_pdf:
+    nomes_arquivos = sorted([f.name for f in arquivos_pdf])
+    # Verifica se os arquivos mudaram para decidir se reprocessa
+    if "vector_store" not in st.session_state or st.session_state.get("nomes_arquivos") != nomes_arquivos:
+        st.session_state.nomes_arquivos = nomes_arquivos
+        st.session_state.vector_store = obter_vector_store(arquivos_pdf, google_api_key)
+        # Limpa o histórico de chat ao carregar novos documentos
+        st.session_state.messages = [{"role": "assistant", "content": f"Olá! Analisei {len(arquivos_pdf)} contratos. O que você gostaria de saber?"}]
 
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": f"Olá! Estou pronto para responder perguntas sobre o documento **{arquivo_pdf.name}**."}]
+         st.session_state.messages = [{"role": "assistant", "content": f"Olá! Analisei {len(arquivos_pdf)} contratos. O que você gostaria de saber?"}]
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if "sources" in message:
                 with st.expander("Ver Fontes Utilizadas"):
-                    for i, doc in enumerate(message["sources"]):
-                        st.markdown(f"**Fonte {i+1} (Página {doc.metadata.get('page', 'N/A')})**")
+                    for doc in message["sources"]:
+                        # Exibe o nome do arquivo de origem junto com a página
+                        st.markdown(f"**Fonte: `{doc.metadata.get('source', 'N/A')}` (Página {doc.metadata.get('page', 'N/A')})**")
                         st.info(f"{doc.page_content[:250]}...")
 
-    if prompt := st.chat_input("Qual sua pergunta sobre o contrato?"):
+    if prompt := st.chat_input("Ex: 'Quais autores têm cláusula de direitos para audiolivro?'"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner("Analisando e formulando a resposta..."):
+            with st.spinner("Pesquisando em todos os contratos..."):
                 vector_store = st.session_state.vector_store
                 if vector_store:
-                    # Criação da cadeia de QA "na hora", usando o novo prompt
                     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1)
-                    
-                    # Preenche o template do prompt com as variáveis necessárias
-                    prompt_template = PromptTemplate(
-                        template=template_prompt, input_variables=["context", "question", "language"]
-                    )
-                    
+                    prompt_template = PromptTemplate(template=template_prompt, input_variables=["context", "question", "language"])
                     qa_chain = RetrievalQA.from_chain_type(
-                        llm=llm,
-                        chain_type="stuff",
-                        retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
+                        llm=llm, chain_type="stuff",
+                        retriever=vector_store.as_retriever(search_kwargs={"k": 5}), # Aumentamos para 5 fontes para ter mais contexto
                         return_source_documents=True,
-                        # A mágica acontece aqui, ao passar o prompt personalizado
                         chain_type_kwargs={"prompt": prompt_template.partial(language=idioma_selecionado)}
                     )
-                    
                     resultado = qa_chain({"query": prompt})
                     resposta = resultado["result"]
                     fontes = resultado["source_documents"]
-                    
                     st.markdown(resposta)
-
                     with st.expander("Ver Fontes Utilizadas"):
-                        for i, doc in enumerate(fontes):
-                             st.markdown(f"**Fonte {i+1} (Página {doc.metadata.get('page', 'N/A')})**")
+                        for doc in fontes:
+                             st.markdown(f"**Fonte: `{doc.metadata.get('source', 'N/A')}` (Página {doc.metadata.get('page', 'N/A')})**")
                              st.info(f"{doc.page_content[:250]}...")
-                    
                     st.session_state.messages.append({"role": "assistant", "content": resposta, "sources": fontes})
                 else:
-                    st.error("Ocorreu um erro ao processar o documento. Verifique a chave de API.")
+                    st.error("Ocorreu um erro. Por favor, verifique se os documentos foram carregados corretamente.")
 
 else:
-    st.info("Por favor, faça o upload de um documento em PDF para começar.")
+    st.info("Por favor, faça o upload de um ou mais documentos em PDF para começar.")
