@@ -1,8 +1,11 @@
-langchain
-langchain-core
-langchain-community
-faiss-cpu
-google-generativeai
-langchain-google-genai
-pypdf
 streamlit
+pandas
+langchain
+langchain-community
+langchain-google-genai
+google-generativeai
+faiss-cpu # ou faiss-gpu se você tiver uma GPU e CUDA configurados
+pydantic
+numpy
+Pillow
+PyMuPDF
