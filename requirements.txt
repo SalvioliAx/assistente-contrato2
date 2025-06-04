@@ -4,7 +4,6 @@ langchain
 langchain-community
 langchain-google-genai
 google-generativeai
-faiss-cpu # ou faiss-gpu se você tiver uma GPU e CUDA configurados
 pydantic
 numpy
 Pillow
