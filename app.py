@@ -45,6 +45,12 @@ def initialize_firebase():
         creds_dict = st.secrets["firebase_credentials"]
         # Obtém o nome do bucket de armazenamento
         bucket_name = st.secrets["firebase_config"]["storageBucket"]
+
+        # CORREÇÃO: Garante que as credenciais sejam um dicionário.
+        # O Streamlit pode ler o objeto JSON dos segredos como uma string.
+        # Esta verificação converte a string para um dicionário, se necessário.
+        if isinstance(creds_dict, str):
+            creds_dict = json.loads(creds_dict)
         
         # Verifica se o app já foi inicializado para evitar erros
         if not firebase_admin._apps:
@@ -124,7 +130,7 @@ def salvar_colecao_atual(nome_colecao, vector_store_atual, nomes_arquivos_atuais
         st.error("Por favor, forneça um nome para a coleção.")
         return False
         
-    with st.spinner(f"Salvando coleção '{nome_colecao}' no Firebase..."):
+    with st.spinner(f"A salvar coleção '{nome_colecao}' no Firebase..."):
         # Usar um diretório temporário para salvar os arquivos do índice
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
@@ -167,7 +173,7 @@ def salvar_colecao_atual(nome_colecao, vector_store_atual, nomes_arquivos_atuais
 
 
 # Carrega uma coleção do Firestore e Firebase Storage
-@st.cache_resource(show_spinner="Carregando coleção do Firebase...")
+@st.cache_resource(show_spinner="A carregar coleção do Firebase...")
 def carregar_colecao(nome_colecao, _embeddings_obj):
     if not db or not BUCKET_NAME:
         st.error("Conexão com Firebase não está disponível.")
@@ -219,7 +225,7 @@ def carregar_colecao(nome_colecao, _embeddings_obj):
 
 
 # --- FUNÇÕES DE PROCESSAMENTO DE DOCUMENTOS ---
-@st.cache_resource(show_spinner="Analisando documentos para busca e chat...")
+@st.cache_resource(show_spinner="A analisar documentos para busca e chat...")
 def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
     if not lista_arquivos_pdf_upload or not google_api_key or not _embeddings_obj:
         return None, None
@@ -237,7 +243,7 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
 
     for arquivo_pdf_upload in lista_arquivos_pdf_upload:
         nome_arquivo = arquivo_pdf_upload.name
-        st.info(f"Processando arquivo: {nome_arquivo}...")
+        st.info(f"A processar ficheiro: {nome_arquivo}...")
         documentos_arquivo_atual = []
         texto_extraido_com_sucesso = False
         
@@ -248,7 +254,7 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
         try:
             # Tentativa 1: PyPDFLoader
             try:
-                st.write(f"Tentando PyPDFLoader para {nome_arquivo}...")
+                st.write(f"A tentar PyPDFLoader para {nome_arquivo}...")
                 loader = PyPDFLoader(str(temp_file_path))
                 pages_pypdf = loader.load()
                 if pages_pypdf:
@@ -264,12 +270,12 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
                         st.success(f"Texto extraído com PyPDFLoader para {nome_arquivo}.")
                         texto_extraido_com_sucesso = True
             except Exception as e_pypdf:
-                st.warning(f"PyPDFLoader falhou para {nome_arquivo}: {e_pypdf}. Tentando PyMuPDF.")
+                st.warning(f"PyPDFLoader falhou para {nome_arquivo}: {e_pypdf}. A tentar PyMuPDF.")
 
             # Tentativa 2: PyMuPDF (fitz) se PyPDFLoader falhou ou não extraiu texto suficiente
             if not texto_extraido_com_sucesso:
                 try:
-                    st.write(f"Tentando PyMuPDF (fitz) para {nome_arquivo}...")
+                    st.write(f"A tentar PyMuPDF (fitz) para {nome_arquivo}...")
                     documentos_arquivo_atual = [] # Limpar docs anteriores se PyPDFLoader falhou
                     doc_fitz = fitz.open(str(temp_file_path))
                     texto_fitz_completo = ""
@@ -287,11 +293,11 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
                         st.info(f"Texto (limitado) extraído com PyMuPDF para {nome_arquivo}.")
                         texto_extraido_com_sucesso = True
                 except Exception as e_fitz:
-                    st.warning(f"PyMuPDF (fitz) falhou para {nome_arquivo}: {e_fitz}. Tentando Gemini Vision.")
+                    st.warning(f"PyMuPDF (fitz) falhou para {nome_arquivo}: {e_fitz}. A tentar Gemini Vision.")
 
             # Tentativa 3: Gemini Vision se as outras falharem e llm_vision estiver disponível
             if not texto_extraido_com_sucesso and llm_vision:
-                st.write(f"Tentando Gemini Vision para {nome_arquivo}...")
+                st.write(f"A tentar Gemini Vision para {nome_arquivo}...")
                 documentos_arquivo_atual = [] # Limpar docs anteriores
                 try:
                     arquivo_pdf_upload.seek(0)
@@ -314,7 +320,7 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
                             ]
                         )
                         
-                        with st.spinner(f"Gemini processando página {page_num_gemini + 1}/{len(doc_fitz_vision)} de {nome_arquivo}..."):
+                        with st.spinner(f"Gemini a processar página {page_num_gemini + 1}/{len(doc_fitz_vision)} de {nome_arquivo}..."):
                             ai_msg = llm_vision.invoke([human_message])
                         
                         if isinstance(ai_msg, AIMessage) and ai_msg.content and isinstance(ai_msg.content, str):
@@ -338,10 +344,10 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
                 documentos_totais.extend(documentos_arquivo_atual)
                 nomes_arquivos_processados.append(nome_arquivo)
             elif not texto_extraido_com_sucesso : # Se nenhuma tentativa funcionou
-                st.error(f"Não foi possível extrair texto do arquivo: {nome_arquivo}. O arquivo pode estar vazio, corrompido ou ser uma imagem complexa demais para os métodos atuais.")
+                st.error(f"Não foi possível extrair texto do ficheiro: {nome_arquivo}. O ficheiro pode estar vazio, corrompido ou ser uma imagem complexa demais para os métodos atuais.")
 
         except Exception as e_geral_arquivo:
-            st.error(f"Erro geral ao processar o arquivo {nome_arquivo}: {e_geral_arquivo}")
+            st.error(f"Erro geral ao processar o ficheiro {nome_arquivo}: {e_geral_arquivo}")
         finally:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
@@ -359,7 +365,7 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
              st.error("A fragmentação do texto não resultou em nenhum documento. Verifique o conteúdo extraído.")
              return None, nomes_arquivos_processados # Retornar arquivos que tiveram algum processamento
 
-        st.info(f"Criando vector store com {len(docs_fragmentados)} fragmentos de {len(nomes_arquivos_processados)} arquivos.")
+        st.info(f"A criar vector store com {len(docs_fragmentados)} fragmentos de {len(nomes_arquivos_processados)} ficheiros.")
         vector_store = FAISS.from_documents(docs_fragmentados, _embeddings_obj)
         st.success("Vector store criado com sucesso!")
         return vector_store, nomes_arquivos_processados
@@ -372,7 +378,7 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
         return None, nomes_arquivos_processados
 
 
-@st.cache_data(show_spinner="Extraindo dados detalhados dos contratos...")
+@st.cache_data(show_spinner="A extrair dados detalhados dos contratos...")
 def extrair_dados_dos_contratos(_vector_store: Optional[FAISS], _nomes_arquivos: list) -> list:
     if not _vector_store or not google_api_key or not _nomes_arquivos: return []
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
@@ -408,7 +414,7 @@ def extrair_dados_dos_contratos(_vector_store: Optional[FAISS], _nomes_arquivos:
             operacao_atual += 1
             progress_value = operacao_atual / total_operacoes if total_operacoes > 0 else 0
             barra_progresso_placeholder.progress(progress_value,
-                                         text=f"Extraindo '{campo}' de {nome_arquivo} ({operacao_atual}/{total_operacoes})")
+                                         text=f"A extrair '{campo}' de {nome_arquivo} ({operacao_atual}/{total_operacoes})")
             
             docs_relevantes = retriever_arquivo_atual.get_relevant_documents(pergunta_chave + " " + instrucao_adicional)
             contexto = "\n\n---\n\n".join([f"Trecho do documento '{doc.metadata.get('source', 'N/A')}' (página {doc.metadata.get('page', 'N/A')} - método {doc.metadata.get('method', 'N/A')}):\n{doc.page_content}" for doc in docs_relevantes])
@@ -476,7 +482,7 @@ def extrair_dados_dos_contratos(_vector_store: Optional[FAISS], _nomes_arquivos:
     if resultados_finais:
         st.success("Extração detalhada para dashboard e anomalias concluída!")
     else:
-        st.warning("Nenhum dado foi extraído. Verifique os logs e os arquivos.")
+        st.warning("Nenhum dado foi extraído. Verifique os logs e os ficheiros.")
     return resultados_finais
 
 
@@ -551,12 +557,12 @@ def detectar_anomalias_no_dataframe(df: pd.DataFrame) -> List[str]:
                     documentos_com_categoria_rara = df[serie_cat == categoria]['arquivo_fonte'].tolist()
                     anomalias_encontradas.append(f"**Anomalia Categórica:** O valor/categoria '`{categoria}`' para o campo '{campo}' é incomum (presente em {freq*100:.1f}% dos contratos: {', '.join(documentos_com_categoria_rara[:3])}{'...' if len(documentos_com_categoria_rara) > 3 else ''}).")
     
-    if not anomalias_encontradas: return ["Nenhuma anomalia significativa detectada com os critérios atuais."]
+    if not anomalias_encontradas: return ["Nenhuma anomalia significativa detetada com os critérios atuais."]
     return anomalias_encontradas
 
-@st.cache_data(show_spinner="Gerando resumo executivo...")
+@st.cache_data(show_spinner="A gerar resumo executivo...")
 def gerar_resumo_executivo(arquivo_pdf_bytes, nome_arquivo_original):
-    if not arquivo_pdf_bytes or not google_api_key: return "Erro: Arquivo ou chave de API não fornecidos."
+    if not arquivo_pdf_bytes or not google_api_key: return "Erro: Ficheiro ou chave de API não fornecidos."
     
     texto_completo = ""
     # Tentar extrair texto usando PyMuPDF primeiro, pois é mais robusto para PDFs diversos
@@ -565,7 +571,7 @@ def gerar_resumo_executivo(arquivo_pdf_bytes, nome_arquivo_original):
             for page in doc_fitz:
                 texto_completo += page.get_text() + "\n"
     except Exception as e_fitz:
-        st.warning(f"PyMuPDF falhou na extração para resumo de {nome_arquivo_original}: {e_fitz}. Tentando PyPDFLoader.")
+        st.warning(f"PyMuPDF falhou na extração para resumo de {nome_arquivo_original}: {e_fitz}. A tentar PyPDFLoader.")
         # Fallback para PyPDFLoader se PyMuPDF falhar (embora menos provável com bytes)
         # Para PyPDFLoader, precisamos salvar em um arquivo temporário
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -584,7 +590,7 @@ def gerar_resumo_executivo(arquivo_pdf_bytes, nome_arquivo_original):
 
     if not texto_completo.strip():
          # Se ainda não houver texto, tentar Gemini Vision como último recurso
-        st.info(f"Texto não extraído por métodos convencionais para resumo de {nome_arquivo_original}. Tentando Gemini Vision...")
+        st.info(f"Texto não extraído por métodos convencionais para resumo de {nome_arquivo_original}. A tentar Gemini Vision...")
         try:
             llm_vision_resumo = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1)
             with fitz.open(stream=arquivo_pdf_bytes, filetype="pdf") as doc_fitz_vision:
@@ -598,7 +604,7 @@ def gerar_resumo_executivo(arquivo_pdf_bytes, nome_arquivo_original):
                         {"type": "text", "text": prompt_ocr},
                         {"type": "image_url", "image_url": f"data:image/png;base64,{base64_image_ocr}"}
                     ])
-                    with st.spinner(f"Gemini resumindo página {page_num + 1} de {nome_arquivo_original}..."):
+                    with st.spinner(f"Gemini a resumir página {page_num + 1} de {nome_arquivo_original}..."):
                         ai_msg_ocr = llm_vision_resumo.invoke([human_message_ocr])
                     if isinstance(ai_msg_ocr, AIMessage) and ai_msg_ocr.content and isinstance(ai_msg_ocr.content, str):
                         texto_completo += ai_msg_ocr.content + "\n\n"
@@ -626,7 +632,7 @@ def gerar_resumo_executivo(arquivo_pdf_bytes, nome_arquivo_original):
     except Exception as e: return f"Erro ao gerar resumo: {e}"
 
 
-@st.cache_data(show_spinner="Analisando riscos no documento...")
+@st.cache_data(show_spinner="A analisar riscos no documento...")
 def analisar_documento_para_riscos(texto_completo_doc, nome_arquivo_doc):
     if not texto_completo_doc or not google_api_key: return f"Não foi possível analisar riscos para '{nome_arquivo_doc}': Texto ou Chave API ausente."
     llm_riscos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
@@ -645,7 +651,7 @@ def analisar_documento_para_riscos(texto_completo_doc, nome_arquivo_doc):
         return resultado['text']
     except Exception as e: return f"Erro ao analisar riscos para '{nome_arquivo_doc}': {e}"
 
-@st.cache_data(show_spinner="Extraindo datas e prazos dos contratos...")
+@st.cache_data(show_spinner="A extrair datas e prazos dos contratos...")
 def extrair_eventos_dos_contratos(textos_completos_docs: List[dict]) -> List[dict]:
     if not textos_completos_docs or not google_api_key: return []
     llm_eventos = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0, request_timeout=120)
@@ -671,10 +677,10 @@ LISTA DE EVENTOS ENCONTRADOS:"""
     output_fixing_parser = OutputFixingParser.from_llm(parser=parser, llm=ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.0))
     chain_eventos_llm_only = prompt_eventos | llm_eventos
     todos_os_eventos_formatados = []
-    barra_progresso_eventos = st.progress(0, text="Iniciando extração de datas...")
+    barra_progresso_eventos = st.progress(0, text="A iniciar extração de datas...")
     for i, doc_info in enumerate(textos_completos_docs):
         nome_arquivo, texto_contrato = doc_info["nome"], doc_info["texto"]
-        barra_progresso_eventos.progress((i + 1) / len(textos_completos_docs), text=f"Analisando datas em: {nome_arquivo}")
+        barra_progresso_eventos.progress((i + 1) / len(textos_completos_docs), text=f"A analisar datas em: {nome_arquivo}")
         try:
             # Limitar o tamanho do texto_contrato para evitar erros de token
             texto_contrato_limitado = texto_contrato[:25000] # Ajuste conforme necessário
@@ -684,7 +690,7 @@ LISTA DE EVENTOS ENCONTRADOS:"""
             try: 
                 resultado_parseado = parser.parse(resposta_ia_str)
             except Exception as e_parse:
-                st.write(f"Parser Pydantic inicial falhou para {nome_arquivo} (eventos), tentando com OutputFixingParser. Erro: {e_parse}")
+                st.write(f"Parser Pydantic inicial falhou para {nome_arquivo} (eventos), a tentar com OutputFixingParser. Erro: {e_parse}")
                 st.code(resposta_ia_str[:1000], language="text") # Mostrar o que a IA retornou
                 resultado_parseado = output_fixing_parser.parse(resposta_ia_str)
             
@@ -712,7 +718,7 @@ LISTA DE EVENTOS ENCONTRADOS:"""
     return todos_os_eventos_formatados
 
 
-@st.cache_data(show_spinner="Verificando conformidade do documento...")
+@st.cache_data(show_spinner="A verificar conformidade do documento...")
 def verificar_conformidade_documento(texto_doc_referencia, nome_doc_referencia, texto_doc_analisar, nome_doc_analisar):
     if not texto_doc_referencia or not texto_doc_analisar or not google_api_key: return "Erro: Textos dos documentos ou Chave API ausentes."
     llm_conformidade = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1, request_timeout=180)
@@ -786,7 +792,7 @@ else:
 # --- LAYOUT PRINCIPAL E SIDEBAR ---
 st.title("💡 Analisador-IA ProMax")
 st.sidebar.image("https://i.imgur.com/aozL2jD.png", width=100) # Exemplo de logo
-st.sidebar.header("Gerenciar Documentos")
+st.sidebar.header("Gerir Documentos")
 
 if db:
     modo_documento = st.sidebar.radio("Como carregar os documentos?", ("Fazer novo upload de PDFs", "Carregar coleção do Firebase"), key="modo_doc_radio_v3", index=0)
@@ -797,7 +803,7 @@ if db:
         if arquivos_pdf_upload_sidebar:
             if st.sidebar.button("Processar Documentos Carregados", key="btn_proc_upload_sidebar_v3", use_container_width=True):
                 if google_api_key and embeddings_global:
-                    with st.spinner("Processando e indexando documentos... Isso pode levar alguns minutos, especialmente com Gemini Vision."):
+                    with st.spinner("A processar e indexar documentos... Isto pode levar alguns minutos, especialmente com Gemini Vision."):
                         vs, nomes_arqs = obter_vector_store_de_uploads(arquivos_pdf_upload_sidebar, embeddings_global)
                     
                     if vs and nomes_arqs: # Checar se o processamento foi bem sucedido
@@ -844,7 +850,7 @@ if db:
             else: st.sidebar.warning("Dê um nome e certifique-se de que há docs carregados.")
 
 if "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: st.sidebar.markdown(f"**🔥 Coleção Ativa:** `{st.session_state.colecao_ativa}`")
-elif "nomes_arquivos" in st.session_state and st.session_state.nomes_arquivos: st.sidebar.markdown(f"**📄 Arquivos em Memória:** {len(st.session_state.nomes_arquivos)}")
+elif "nomes_arquivos" in st.session_state and st.session_state.nomes_arquivos: st.sidebar.markdown(f"**📄 Ficheiros em Memória:** {len(st.session_state.nomes_arquivos)}")
 
 st.sidebar.header("Configurações de Idioma"); idioma_selecionado = st.sidebar.selectbox("Idioma para o CHAT:", ("Português", "Inglês", "Espanhol"), key="idioma_chat_key_sidebar_v3")
 
@@ -867,9 +873,9 @@ else:
     arquivos_pdf_originais_global = st.session_state.get("arquivos_pdf_originais") # Pode ser None se carregou coleção
 
     with tab_chat:
-        st.header("Converse com seus documentos")
+        st.header("Converse com os seus documentos")
         if not st.session_state.messages : 
-            st.session_state.messages.append({"role": "assistant", "content": f"Olá! Documentos da coleção '{st.session_state.get('colecao_ativa', 'atual')}' prontos ({len(nomes_arquivos_global)} arquivo(s)). Qual sua pergunta?"})
+            st.session_state.messages.append({"role": "assistant", "content": f"Olá! Documentos da coleção '{st.session_state.get('colecao_ativa', 'atual')}' prontos ({len(nomes_arquivos_global)} ficheiro(s)). Qual a sua pergunta?"})
         
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
@@ -898,13 +904,13 @@ else:
             st.download_button(label="📥 Exportar Conversa",data=chat_exportado_md, file_name=f"conversa_contratos_{agora}.md", mime="text/markdown", key="export_chat_btn_tab_v3")
         
         st.markdown("---")
-        if prompt := st.chat_input("Faça sua pergunta sobre os contratos...", key="chat_input_v3", disabled=not documentos_prontos):
+        if prompt := st.chat_input("Faça a sua pergunta sobre os contratos...", key="chat_input_v3", disabled=not documentos_prontos):
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"): st.markdown(prompt)
             
             with st.chat_message("assistant"):
                 message_placeholder = st.empty()
-                with st.spinner("Pesquisando e pensando..."):
+                with st.spinner("A pesquisar e a pensar..."):
                     llm_chat = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
                     template_prompt_chat_str = (
                         "Use os seguintes trechos de contexto para responder à pergunta no final. "
@@ -961,7 +967,7 @@ else:
                     st.success(f"Dados extraídos para {len(st.session_state.df_dashboard)} contratos.")
                 else: 
                     st.session_state.df_dashboard = pd.DataFrame()
-                    st.warning("Nenhum dado foi extraído para o dashboard. Verifique os logs ou os arquivos.")
+                    st.warning("Nenhum dado foi extraído para o dashboard. Verifique os logs ou os ficheiros.")
                 st.session_state.pop('anomalias_resultados', None) # Limpar anomalias antigas
                 st.rerun()
 
@@ -975,7 +981,7 @@ else:
         if arquivos_pdf_originais_global:
             lista_nomes_arquivos_resumo = [f.name for f in arquivos_pdf_originais_global]
             if lista_nomes_arquivos_resumo:
-                arquivo_selecionado_nome_resumo = st.selectbox("Escolha um contrato para resumir:", options=lista_nomes_arquivos_resumo, key="select_resumo_tab_v3", index=None, placeholder="Selecione um arquivo")
+                arquivo_selecionado_nome_resumo = st.selectbox("Escolha um contrato para resumir:", options=lista_nomes_arquivos_resumo, key="select_resumo_tab_v3", index=None, placeholder="Selecione um ficheiro")
                 if arquivo_selecionado_nome_resumo and st.button("✍️ Gerar Resumo Executivo", key="btn_resumo_tab_v3", use_container_width=True):
                     arquivo_obj_selecionado = next((arq for arq in arquivos_pdf_originais_global if arq.name == arquivo_selecionado_nome_resumo), None)
                     if arquivo_obj_selecionado:
@@ -984,13 +990,13 @@ else:
                         st.session_state.resumo_gerado = resumo
                         st.session_state.arquivo_resumido = arquivo_selecionado_nome_resumo
                         st.rerun()
-                    else: st.error("Arquivo selecionado não encontrado (isso não deveria acontecer).")
+                    else: st.error("Ficheiro selecionado não encontrado (isto não deveria acontecer).")
                 
                 if st.session_state.get("arquivo_resumido") == arquivo_selecionado_nome_resumo and st.session_state.get("resumo_gerado"):
                     st.subheader(f"Resumo do Contrato: {st.session_state.arquivo_resumido}"); st.markdown(st.session_state.resumo_gerado)
-            else: st.info("Nenhum arquivo carregado disponível para resumo nesta sessão.")
+            else: st.info("Nenhum ficheiro carregado disponível para resumo nesta sessão.")
         elif nomes_arquivos_global:
-             st.info("A função de resumo individual de arquivos é otimizada para uploads novos. Para coleções, use o chat para pedir resumos.")
+             st.info("A função de resumo individual de ficheiros é otimizada para uploads novos. Para coleções, use o chat para pedir resumos.")
         else: st.warning("Carregue documentos para usar a função de resumo.")
 
     with tab_riscos:
@@ -1011,7 +1017,7 @@ else:
                         if texto_doc_risco.strip():
                              textos_completos_docs_riscos.append({"nome": arquivo_pdf_obj.name, "texto": texto_doc_risco})
                         else:
-                            st.info(f"Texto não extraído por PyMuPDF para análise de risco de {arquivo_pdf_obj.name}. Tentando Gemini Vision...")
+                            st.info(f"Texto não extraído por PyMuPDF para análise de risco de {arquivo_pdf_obj.name}. A tentar Gemini Vision...")
                             texto_gemini_risco = ""
                             llm_vision_risco = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1)
                             with fitz.open(stream=pdf_bytes_risco, filetype="pdf") as doc_fitz_gemini_risco:
@@ -1021,7 +1027,7 @@ else:
                                     img_bytes_g_risco = pix_g_risco.tobytes("png")
                                     base64_img_g_risco = base64.b64encode(img_bytes_g_risco).decode('utf-8')
                                     msg_g_risco = HumanMessage(content=[{"type": "text", "text": "Extraia o texto desta página."}, {"type": "image_url", "image_url": f"data:image/png;base64,{base64_img_g_risco}"}])
-                                    with st.spinner(f"Gemini (riscos) processando pág {page_num_g_risco+1} de {arquivo_pdf_obj.name}..."):
+                                    with st.spinner(f"Gemini (riscos) a processar pág {page_num_g_risco+1} de {arquivo_pdf_obj.name}..."):
                                         ai_msg_g_risco = llm_vision_risco.invoke([msg_g_risco])
                                     if isinstance(ai_msg_g_risco, AIMessage) and ai_msg_g_risco.content and isinstance(ai_msg_g_risco.content, str):
                                         texto_gemini_risco += ai_msg_g_risco.content + "\n\n"
@@ -1035,9 +1041,9 @@ else:
 
                 resultados_analise_riscos_temp = {}
                 if textos_completos_docs_riscos:
-                    barra_riscos = st.progress(0, text="Analisando riscos...")
+                    barra_riscos = st.progress(0, text="A analisar riscos...")
                     for idx, doc_info_risco in enumerate(textos_completos_docs_riscos):
-                        barra_riscos.progress((idx + 1) / len(textos_completos_docs_riscos), text=f"Analisando riscos em: {doc_info_risco['nome']}...")
+                        barra_riscos.progress((idx + 1) / len(textos_completos_docs_riscos), text=f"A analisar riscos em: {doc_info_risco['nome']}...")
                         resultado_risco_doc = analisar_documento_para_riscos(doc_info_risco["texto"], doc_info_risco["nome"])
                         resultados_analise_riscos_temp[doc_info_risco["nome"]] = resultado_risco_doc
                         time.sleep(1.5) 
@@ -1053,11 +1059,11 @@ else:
                 for nome_arquivo_risco, analise_risco in st.session_state.analise_riscos_resultados.items():
                     with st.expander(f"Riscos Identificados em: {nome_arquivo_risco}", expanded=True): st.markdown(analise_risco)
         elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
-            st.warning("A Análise de Riscos detalhada funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
+            st.warning("A Análise de Riscos detalhada funciona melhor com ficheiros recém-carregados, pois requer o conteúdo completo.")
         else: st.info("Faça o upload de documentos para ativar a análise de riscos.")
 
     with tab_prazos:
-        st.header("🗓️ Monitoramento de Prazos e Vencimentos")
+        st.header("🗓️ Monitorização de Prazos e Vencimentos")
         st.markdown("Extrai e organiza datas e prazos importantes dos documentos carregados na sessão atual.")
         if arquivos_pdf_originais_global:
             if st.button("🔍 Analisar Prazos e Datas Importantes", key="btn_analise_prazos_v3", use_container_width=True):
@@ -1073,7 +1079,7 @@ else:
                         if texto_doc_prazo.strip():
                             textos_completos_para_datas_prazos.append({"nome": arquivo_pdf_obj_prazo.name, "texto": texto_doc_prazo})
                         else:
-                            st.info(f"Texto não extraído por PyMuPDF para análise de prazos de {arquivo_pdf_obj_prazo.name}. Tentando Gemini Vision...")
+                            st.info(f"Texto não extraído por PyMuPDF para análise de prazos de {arquivo_pdf_obj_prazo.name}. A tentar Gemini Vision...")
                             texto_gemini_prazo = ""
                             llm_vision_prazo = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1)
                             with fitz.open(stream=pdf_bytes_prazo, filetype="pdf") as doc_fitz_gemini_prazo:
@@ -1083,7 +1089,7 @@ else:
                                     img_bytes_g_prazo = pix_g_prazo.tobytes("png")
                                     base64_img_g_prazo = base64.b64encode(img_bytes_g_prazo).decode('utf-8')
                                     msg_g_prazo = HumanMessage(content=[{"type": "text", "text": "Extraia o texto desta página."}, {"type": "image_url", "image_url": f"data:image/png;base64,{base64_img_g_prazo}"}])
-                                    with st.spinner(f"Gemini (prazos) processando pág {page_num_g_prazo+1} de {arquivo_pdf_obj_prazo.name}..."):
+                                    with st.spinner(f"Gemini (prazos) a processar pág {page_num_g_prazo+1} de {arquivo_pdf_obj_prazo.name}..."):
                                         ai_msg_g_prazo = llm_vision_prazo.invoke([msg_g_prazo])
                                     if isinstance(ai_msg_g_prazo, AIMessage) and ai_msg_g_prazo.content and isinstance(ai_msg_g_prazo.content, str):
                                         texto_gemini_prazo += ai_msg_g_prazo.content + "\n\n"
@@ -1135,10 +1141,10 @@ else:
                         else: st.info("Nenhum evento encontrado para os próximos 90 dias.")
                     else: st.info("Nenhuma data válida encontrada para filtrar próximos eventos ou a coluna 'Data Objeto' está ausente/malformada.")
                 elif ("btn_analise_prazos_v3" in st.session_state and st.session_state.btn_analise_prazos_v3):
-                     st.warning("A extração de datas não retornou resultados. Verifique os avisos ou os arquivos.")
+                     st.warning("A extração de datas não retornou resultados. Verifique os avisos ou os ficheiros.")
         elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
-            st.warning("O Monitoramento de Prazos funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
-        else: st.info("Faça o upload de documentos para ativar o monitoramento de prazos.")
+            st.warning("A Monitorização de Prazos funciona melhor com ficheiros recém-carregados, pois requer o conteúdo completo.")
+        else: st.info("Faça o upload de documentos para ativar a monitorização de prazos.")
 
     with tab_conformidade:
         st.header("⚖️ Verificador de Conformidade Contratual")
@@ -1175,9 +1181,9 @@ else:
                     
                     if not texto_doc_referencia_conf.strip(): st.error(f"Não foi possível ler o conteúdo do documento de referência: {doc_referencia_nome_conf}")
                     else:
-                        barra_conf = st.progress(0, text="Analisando conformidade...")
+                        barra_conf = st.progress(0, text="A analisar conformidade...")
                         for idx_conf, nome_doc_analisar_conf in enumerate(docs_a_analisar_nomes_conf):
-                            barra_conf.progress((idx_conf + 1) / len(docs_a_analisar_nomes_conf), text=f"Analisando '{nome_doc_analisar_conf}' vs '{doc_referencia_nome_conf}'...")
+                            barra_conf.progress((idx_conf + 1) / len(docs_a_analisar_nomes_conf), text=f"A analisar '{nome_doc_analisar_conf}' vs '{doc_referencia_nome_conf}'...")
                             doc_analisar_obj_conf = next((arq for arq in arquivos_pdf_originais_global if arq.name == nome_doc_analisar_conf), None)
                             if doc_analisar_obj_conf:
                                 texto_doc_analisar_conf = ""
@@ -1194,7 +1200,7 @@ else:
                                     st.session_state.conformidade_resultados[f"{nome_doc_analisar_conf}_vs_{doc_referencia_nome_conf}"] = resultado_conformidade_doc
                                     time.sleep(2) 
                                 else: st.error(f"Não foi possível ler o conteúdo do documento a analisar: {nome_doc_analisar_conf}")
-                            else: st.error(f"Objeto do arquivo '{nome_doc_analisar_conf}' não encontrado (erro interno).")
+                            else: st.error(f"Objeto do ficheiro '{nome_doc_analisar_conf}' não encontrado (erro interno).")
                         barra_conf.empty()
                         st.success("Análise de conformidade concluída.")
                         st.rerun()
@@ -1204,11 +1210,11 @@ else:
                 for chave_analise_conf, relatorio_conf in st.session_state.conformidade_resultados.items():
                     with st.expander(f"Relatório: {chave_analise_conf.replace('_vs_', ' vs ')}", expanded=True): st.markdown(relatorio_conf)
         elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
-            st.warning("A Verificação de Conformidade funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
+            st.warning("A Verificação de Conformidade funciona melhor com ficheiros recém-carregados, pois requer o conteúdo completo.")
         else: st.info("Faça o upload de documentos para ativar a verificação de conformidade.")
     
     with tab_anomalias:
-        st.header("📊 Detecção de Anomalias Contratuais")
+        st.header("📊 Deteção de Anomalias Contratuais")
         st.markdown("Identifica dados que fogem do padrão no conjunto de contratos carregados. "
                     "**Nota:** Esta funcionalidade depende da qualidade e consistência da extração de dados realizada na aba '📈 Dashboard'.")
 
@@ -1219,15 +1225,15 @@ else:
                        "Por favor, vá para a aba '📈 Dashboard' e clique em "
                        "'🚀 Gerar Dados para Dashboard e Anomalias' primeiro.")
         else:
-            st.info("Analisando os dados extraídos da aba 'Dashboard' em busca de anomalias.")
-            if st.button("🚨 Detectar Anomalias Agora", key="btn_detectar_anomalias_v3", use_container_width=True):
+            st.info("A analisar os dados extraídos da aba 'Dashboard' em busca de anomalias.")
+            if st.button("🚨 Detetar Anomalias Agora", key="btn_detectar_anomalias_v3", use_container_width=True):
                 st.session_state.anomalias_resultados = detectar_anomalias_no_dataframe(df_para_anomalias_tab.copy())
                 st.rerun()
             
             if st.session_state.get("anomalias_resultados"):
-                st.subheader("Resultados da Detecção de Anomalias:")
+                st.subheader("Resultados da Deteção de Anomalias:")
                 if isinstance(st.session_state.anomalias_resultados, list) and len(st.session_state.anomalias_resultados) > 0:
                     for anomalia_item in st.session_state.anomalias_resultados:
                         st.markdown(f"- {anomalia_item}")
                 else:
-                    st.info("Nenhuma anomalia significativa detectada com os critérios atuais, ou os dados não foram suficientes para a análise.")
+                    st.info("Nenhuma anomalia significativa detetada com os critérios atuais, ou os dados não foram suficientes para a análise.")
