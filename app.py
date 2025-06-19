@@ -46,10 +46,13 @@ def initialize_firebase():
         # Obtém o nome do bucket de armazenamento
         bucket_name = st.secrets["firebase_config"]["storageBucket"]
 
-        # CORREÇÃO DEFINITIVA: Converte o objeto de segredos do Streamlit para um dicionário Python padrão.
-        # Isto garante que a biblioteca do Firebase recebe os dados no formato exato que espera.
+        # CORREÇÃO 1: Converte o objeto de segredos do Streamlit para um dicionário Python padrão.
         creds_dict = dict(creds_secrets_obj)
         
+        # CORREÇÃO 2: Garante que o nome do bucket não tenha o prefixo 'gs://'.
+        if bucket_name.startswith("gs://"):
+            bucket_name = bucket_name.replace("gs://", "")
+
         # Verifica se o app já foi inicializado para evitar erros
         if not firebase_admin._apps:
             cred = credentials.Certificate(creds_dict)
@@ -86,7 +89,7 @@ class InfoContrato(BaseModel):
 
 class EventoContratual(BaseModel):
     descricao_evento: str = Field(description="Uma descrição clara e concisa do evento ou prazo.")
-    data_evento_str: Optional[str] = Field(default="Não Especificado", description="A data do evento no formato YYYY-MM-DD. Se não aplicável, use 'Não Especificado'.")
+    data_evento_str: Optional[str] = Field(default="Não Especificado", description="A data do evento no formato yyyy-MM-dd. Se não aplicável, use 'Não Especificado'.")
     trecho_relevante: Optional[str] = Field(default=None, description="O trecho exato do contrato que menciona este evento/data.")
 
 class ListaDeEventos(BaseModel):
@@ -657,7 +660,7 @@ def extrair_eventos_dos_contratos(textos_completos_docs: List[dict]) -> List[dic
     prompt_eventos_template_str = """Analise o texto do contrato abaixo. Sua tarefa é identificar TODOS os eventos, datas, prazos e períodos importantes mencionados.
 Para cada evento encontrado, extraia as seguintes informações:
 1.  'descricao_evento': Uma descrição clara e concisa do evento (ex: 'Data de assinatura do contrato', 'Vencimento da primeira parcela', 'Prazo final para entrega do produto', 'Início da vigência', 'Período de carência para alteração de vencimento').
-2.  'data_evento_str': A data específica do evento no formato YYYY-MM-DD. Se uma data EXATA não puder ser determinada ou não se aplicar (ex: '10 dias antes do vencimento', 'prazo indeterminado', 'na fatura mensal'), preencha este campo OBRIGATORIAMENTE com la string 'Não Especificado'. NUNCA use null, None ou deixe o campo vazio.
+2.  'data_evento_str': A data específica do evento no formato yyyy-MM-dd. Se uma data EXATA não puder ser determinada ou não se aplicar (ex: '10 dias antes do vencimento', 'prazo indeterminado', 'na fatura mensal'), preencha este campo OBRIGATORIAMENTE com la string 'Não Especificado'. NUNCA use null, None ou deixe o campo vazio.
 3.  'trecho_relevante': O trecho curto e exato do contrato que menciona este evento/data.
 
 {format_instructions}
