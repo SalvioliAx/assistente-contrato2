@@ -1,12 +1,6 @@
 # app.py
 """
 Ponto de entrada principal da aplicação Streamlit "Analisador-IA ProMax".
-Este arquivo é responsável por:
-- Configurar a página.
-- Inicializar serviços (Firebase, Google AI).
-- Gerenciar o estado da sessão.
-- Construir a interface da barra lateral (sidebar).
-- Orquestrar a renderização das abas (tabs) a partir do módulo `ui_tabs`.
 """
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -18,6 +12,7 @@ from firebase_utils import (
     salvar_colecao_atual, 
     carregar_colecao
 )
+from auth_utils import register_user, login_user # <-- Nova importação
 from pdf_processing import obter_vector_store_de_uploads
 from ui_tabs import (
     render_chat_tab, 
@@ -29,38 +24,42 @@ from ui_tabs import (
     render_anomalias_tab
 )
 
-def main():
-    """Função principal que executa a aplicação Streamlit."""
-    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
-    hide_streamlit_style = "<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;}</style>"
-    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-    st.title("💡 Analisador-IA ProMax")
+def render_login_page(db):
+    """Renderiza a página de login e cadastro."""
+    st.title("Bem-vindo ao Analisador-IA ProMax")
+    
+    login_tab, register_tab = st.tabs(["Login", "Cadastrar"])
 
-    db, BUCKET_NAME = initialize_services()
+    with login_tab:
+        with st.form("login_form"):
+            username = st.text_input("Usuário")
+            password = st.text_input("Senha", type="password")
+            submitted = st.form_submit_button("Login")
+            if submitted:
+                if login_user(db, username, password):
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.rerun()
 
-    embeddings = None
-    if db:
-        try:
-            embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        except Exception as e:
-            st.sidebar.error(f"Erro ao inicializar embeddings: {e}")
+    with register_tab:
+        with st.form("register_form"):
+            new_username = st.text_input("Novo Usuário")
+            new_password = st.text_input("Nova Senha", type="password")
+            confirm_password = st.text_input("Confirme a Senha", type="password")
+            submitted = st.form_submit_button("Cadastrar")
+            if submitted:
+                if new_password == confirm_password:
+                    register_user(db, new_username, new_password)
+                else:
+                    st.error("As senhas não coincidem.")
 
-    # Inicializa o estado da sessão se não existir
-    if "vector_store" not in st.session_state:
-        st.session_state.messages = []
-        st.session_state.vector_store = None
-        st.session_state.arquivos_pdf_originais = None
-        st.session_state.colecao_ativa = None
-        st.session_state.nomes_arquivos = []
-
-
+def render_main_app(db, BUCKET_NAME, embeddings):
+    """Renderiza a aplicação principal após o login."""
+    st.sidebar.title(f"Bem-vindo, {st.session_state.username}")
+    
     with st.sidebar:
         st.image("https://i.imgur.com/aozL2jD.png", width=100)
         st.header("Gerenciar Documentos")
-
-        if not db or not embeddings:
-            st.error("Aplicação desabilitada. Verifique as conexões.")
-            return
 
         modo = st.radio("Carregar documentos:", ("Novo Upload", "Carregar Coleção"), key="modo_carregamento")
 
@@ -106,6 +105,14 @@ def main():
         elif st.session_state.get("nomes_arquivos"):
             st.markdown(f"**📄 Arquivos em Memória:** {len(st.session_state.nomes_arquivos)}")
 
+        st.markdown("---")
+        if st.button("Logout"):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.rerun()
+
+    # Conteúdo principal da aplicação
+    st.title("💡 Analisador-IA ProMax")
     if not st.session_state.get("vector_store"):
         st.info("👈 Por favor, carregue e processe documentos na barra lateral para começar.")
     else:
@@ -113,8 +120,6 @@ def main():
             "💬 Chat", "📈 Dashboard", "📜 Resumo", "🚩 Riscos", "🗓️ Prazos", "⚖️ Conformidade", "📊 Anomalias"
         ])
         
-        # --- CORREÇÃO APLICADA AQUI ---
-        # Garantindo que os argumentos corretos sejam passados para todas as abas
         vector_store = st.session_state.vector_store
         nomes_arquivos = st.session_state.nomes_arquivos
         
@@ -132,6 +137,41 @@ def main():
             render_conformidade_tab(vector_store, nomes_arquivos)
         with tab_anom:
             render_anomalias_tab()
+
+def main():
+    """Função principal que executa a aplicação Streamlit."""
+    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
+    hide_streamlit_style = "<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;}</style>"
+    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+    
+    db, BUCKET_NAME = initialize_services()
+    if not db:
+        st.error("Não foi possível conectar ao Firebase. A aplicação não pode continuar.")
+        return
+
+    embeddings = None
+    try:
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    except Exception as e:
+        st.sidebar.error(f"Erro ao inicializar embeddings: {e}")
+        return
+
+    # Gerenciamento do estado de login
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
+    if not st.session_state.logged_in:
+        render_login_page(db)
+    else:
+        # Inicializa o estado da sessão da aplicação principal apenas se não existir
+        if "vector_store" not in st.session_state:
+            st.session_state.messages = []
+            st.session_state.vector_store = None
+            st.session_state.arquivos_pdf_originais = None
+            st.session_state.colecao_ativa = None
+            st.session_state.nomes_arquivos = []
+        
+        render_main_app(db, BUCKET_NAME, embeddings)
 
 if __name__ == "__main__":
     main()
