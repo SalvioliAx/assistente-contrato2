@@ -20,11 +20,11 @@ from ui_tabs import (
 )
 
 def render_login_page(db):
-    """Renderiza a página de login e cadastro."""
+    """Renderiza a página de login e registo."""
     st.title("Bem-vindo ao Analisador-IA ProMax")
     st.image("https://i.imgur.com/aozL2jD.png", width=120)
     
-    login_tab, register_tab = st.tabs(["Login", "Cadastrar"])
+    login_tab, register_tab = st.tabs(["Login", "Registar"])
 
     with login_tab:
         with st.form("login_form"):
@@ -41,10 +41,10 @@ def render_login_page(db):
 
     with register_tab:
         with st.form("register_form"):
-            new_email = st.text_input("Seu E-mail")
+            new_email = st.text_input("O seu E-mail")
             new_password = st.text_input("Crie uma Senha", type="password")
             confirm_password = st.text_input("Confirme a Senha", type="password")
-            submitted = st.form_submit_button("Cadastrar")
+            submitted = st.form_submit_button("Registar")
             if submitted:
                 if new_password == confirm_password:
                     register_user(new_email, new_password)
@@ -57,7 +57,7 @@ def render_main_app(db, BUCKET_NAME, embeddings):
     st.sidebar.caption(st.session_state.user_email)
     
     with st.sidebar:
-        st.header("Gerenciar Documentos")
+        st.header("Gerir Documentos")
         user_id = st.session_state.user_id
 
         modo = st.radio("Carregar documentos:", ("Novo Upload", "Carregar Coleção"), key="modo_carregamento")
@@ -97,7 +97,7 @@ def render_main_app(db, BUCKET_NAME, embeddings):
         
         st.sidebar.markdown("<hr>", unsafe_allow_html=True)
         if st.sidebar.button("Logout"):
-            for key in st.session_state.keys():
+            for key in list(st.session_state.keys()): # Usar list() para evitar erro de runtime
                 del st.session_state[key]
             st.rerun()
 
@@ -118,12 +118,12 @@ def render_main_app(db, BUCKET_NAME, embeddings):
         with tabs[6]: render_anomalias_tab()
 
 def main():
-    """Função principal que gerencia o fluxo da aplicação."""
+    """Função principal que gere o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
     db, BUCKET_NAME = initialize_services()
     if not db:
-        st.error("Falha na conexão com o banco de dados.")
+        st.error("Falha na ligação à base de dados.")
         return
 
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
