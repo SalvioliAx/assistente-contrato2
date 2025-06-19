@@ -122,10 +122,13 @@ def main():
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
     # --- CORREÇÃO APLICADA AQUI ---
-    # Este CSS oculta o cabeçalho padrão do Streamlit
+    # Este CSS oculta o cabeçalho padrão e o botão "Manage app" do Streamlit
     st.markdown("""
         <style>
             header {visibility: hidden;}
+            div[data-testid="stDeployButton"] {
+                visibility: hidden;
+            }
         </style>
     """, unsafe_allow_html=True)
     
