@@ -125,9 +125,7 @@ def main():
     # sejam ocultados de forma robusta, sem afetar o botão da barra lateral.
     st.markdown("""
         <style>
-            div[data-testid="stToolbar"] {
-                display: none !important;
-            }
+           
             div[data-testid="stDeployButton"] {
                 display: none !important;
             }
