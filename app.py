@@ -22,7 +22,6 @@ from ui_tabs import (
 def render_login_page(db):
     """Renderiza a página de login e cadastro."""
     st.title("Bem-vindo ao Analisador-IA ProMax")
-    st.image("https://i.imgur.com/aozL2jD.png", width=120)
     
     login_tab, register_tab = st.tabs(["Login", "Cadastrar"])
 
@@ -88,7 +87,7 @@ def render_main_app(db, BUCKET_NAME, embeddings):
             else:
                 st.info("Nenhuma coleção salva.")
 
-        if st.session_state.get("vector_store"):
+        if st.session_state.get("vector_store") and modo == "Novo Upload":
             st.markdown("---")
             st.subheader("Salvar Coleção Atual")
             nome_colecao = st.text_input("Nome para a nova coleção:", key="nome_nova_colecao")
@@ -97,7 +96,7 @@ def render_main_app(db, BUCKET_NAME, embeddings):
         
         st.sidebar.markdown("<hr>", unsafe_allow_html=True)
         if st.sidebar.button("Logout"):
-            for key in st.session_state.keys():
+            for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
 
@@ -122,17 +121,15 @@ def main():
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
     # --- CORREÇÃO APLICADA AQUI ---
-    # Este CSS oculta os botões da barra de ferramentas e o botão "Manage app",
-    # mas mantém o resto do cabeçalho, incluindo o botão da barra lateral.
+    # Este CSS utiliza 'display: none !important;' para garantir que os elementos
+    # sejam ocultados de forma robusta, sem afetar o botão da barra lateral.
     st.markdown("""
         <style>
             div[data-testid="stToolbar"] {
-                visibility: hidden;
-                height: 0%;
-                position: fixed;
+                display: none !important;
             }
             div[data-testid="stDeployButton"] {
-                visibility: hidden;
+                display: none !important;
             }
         </style>
     """, unsafe_allow_html=True)
