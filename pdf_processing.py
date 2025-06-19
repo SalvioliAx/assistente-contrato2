@@ -4,6 +4,7 @@ Este módulo contém toda a lógica para processamento de arquivos PDF.
 Isso inclui extração de texto usando múltiplos métodos e a criação
 de um Vector Store com FAISS para busca de similaridade.
 """
+import tempfile
 import streamlit as st
 import os
 from pathlib import Path
