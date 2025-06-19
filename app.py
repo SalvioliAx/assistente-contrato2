@@ -121,6 +121,16 @@ def main():
     """Função principal que gerencia o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
+    # --- CORREÇÃO APLICADA AQUI ---
+    # Este CSS oculta especificamente o botão "Manage app" usando o seu data-testid
+    st.markdown("""
+        <style>
+            button[data-testid="manage-app-button"] {
+                display: none;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    
     db, BUCKET_NAME = initialize_services()
     if not db:
         st.error("Falha na conexão com o banco de dados.")
