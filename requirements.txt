@@ -9,3 +9,4 @@ pydantic
 PyMuPDF
 Pillow
 faiss-cpu
+werkzeug
