@@ -1,7 +1,6 @@
 # app.py
 """
 Ponto de entrada principal da aplicação Streamlit "Analisador-IA ProMax".
-Versão com refatoração visual completa usando Tailwind CSS.
 """
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -20,88 +19,125 @@ from ui_tabs import (
     render_anomalias_tab
 )
 
-def load_visual_assets():
-    """Carrega o CSS customizado e o script do Tailwind CSS."""
-    st.markdown("""
-        <script src="https://cdn.tailwindcss.com"></script>
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-            
-            /* Aplicar a fonte a toda a aplicação */
-            html, body, [class*="st-"] {
-                font-family: 'Inter', sans-serif;
-            }
+def load_css():
+    """Carrega o CSS customizado para a refatoração visual."""
+    css = """
+    <style>
+        /* Importa uma fonte mais profissional do Google Fonts */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
-            /* Esconder elementos padrão do Streamlit */
-            #MainMenu, footer, header {
-                visibility: hidden;
-            }
+        /* Aplica a fonte a toda a aplicação */
+        html, body, [class*="st-"] {
+            font-family: 'Inter', sans-serif;
+        }
 
-            /* Estilo para os botões do Streamlit que não são afetados pelo Tailwind */
-            .stButton>button {
-                transition: all 0.2s ease-in-out;
-            }
-            .stButton>button:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            }
-            
-            /* Customização para o radio button que funciona como abas */
-            div[role="radiogroup"] {
-                display: flex;
-                flex-direction: row;
-                gap: 10px;
-            }
-        </style>
-    """, unsafe_allow_html=True)
+        /* Cor de fundo principal */
+        .stApp {
+            background-color: #F0F2F6;
+        }
+
+        /* Estilo para os botões */
+        .stButton>button {
+            border: none;
+            border-radius: 8px;
+            padding: 10px 24px;
+            background-color: #1C64F2;
+            color: white;
+            font-weight: 600;
+            transition: all 0.2s ease-in-out;
+        }
+
+        .stButton>button:hover {
+            background-color: #0F4AB2;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .stButton>button:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(28, 100, 242, 0.4);
+        }
+        
+        /* Estilo para a sidebar */
+        [data-testid="stSidebar"] {
+            background-color: #FFFFFF;
+            border-right: 1px solid #E0E0E0;
+        }
+
+        /* Estilo para as abas (tabs) */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 24px;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            height: 48px;
+            white-space: pre-wrap;
+            background-color: transparent;
+            border-radius: 8px;
+            padding: 10px 16px;
+        }
+
+        .stTabs [aria-selected="true"] {
+            background-color: #FFFFFF;
+            font-weight: 600;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        /* Estilo para o formulário de login */
+        .login-container {
+            background-color: #FFFFFF;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            margin-top: -50px; /* Eleva um pouco o container */
+        }
+
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
 
 def render_login_page(db):
-    """Renderiza a página de login com um layout aprimorado usando Tailwind CSS."""
-    st.markdown("""
-        <div class="fixed top-0 left-0 w-full h-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center p-4">
-            <div class="bg-white w-full max-w-md p-8 rounded-2xl shadow-lg">
-                <div class="flex flex-col items-center">
-                    <img src="https://i.imgur.com/aozL2jD.png" alt="Logo" class="w-20 h-20 mb-4"/>
-                    <h1 class="text-3xl font-bold text-gray-800">Bem-vindo(a)</h1>
-                    <p class="text-gray-500 mt-2">Faça login ou registe-se para analisar os seus contratos</p>
-                </div>
-    """, unsafe_allow_html=True)
+    """Renderiza a página de login e registo com um layout aprimorado."""
     
-    login_tab, register_tab = st.tabs(["Login", "Registar"])
+    col1, col2, col3 = st.columns([1, 1.2, 1])
 
-    with login_tab:
-        with st.form("login_form"):
-            email = st.text_input("E-mail", placeholder="seu.email@exemplo.com")
-            password = st.text_input("Senha", type="password", placeholder="********")
-            submitted = st.form_submit_button("Entrar")
-            if submitted:
-                user_id = login_user(email, password)
-                if user_id:
-                    st.session_state.logged_in = True
-                    st.session_state.user_id = user_id
-                    st.session_state.user_email = email
-                    st.rerun()
+    with col2:
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
+        st.image("https://i.imgur.com/aozL2jD.png", width=100)
+        st.title("Bem-vindo(a)")
+        st.caption("Faça login ou registe-se para continuar")
+        
+        login_tab, register_tab = st.tabs(["Login", "Registar"])
 
-    with register_tab:
-        with st.form("register_form"):
-            new_email = st.text_input("O seu E-mail", placeholder="seu.email@exemplo.com")
-            new_password = st.text_input("Crie uma Senha", type="password", placeholder="Pelo menos 6 caracteres")
-            confirm_password = st.text_input("Confirme a Senha", type="password", placeholder="Repita a senha")
-            submitted = st.form_submit_button("Registar")
-            if submitted:
-                if new_password == confirm_password:
-                    register_user(new_email, new_password)
-                else:
-                    st.error("As senhas não coincidem.")
-    
-    st.markdown("</div></div>", unsafe_allow_html=True)
+        with login_tab:
+            with st.form("login_form"):
+                email = st.text_input("E-mail", placeholder="seu.email@exemplo.com")
+                password = st.text_input("Senha", type="password", placeholder="********")
+                submitted = st.form_submit_button("Login")
+                if submitted:
+                    user_id = login_user(email, password)
+                    if user_id:
+                        st.session_state.logged_in = True
+                        st.session_state.user_id = user_id
+                        st.session_state.user_email = email
+                        st.rerun()
+
+        with register_tab:
+            with st.form("register_form"):
+                new_email = st.text_input("O seu E-mail", placeholder="seu.email@exemplo.com")
+                new_password = st.text_input("Crie uma Senha", type="password", placeholder="Pelo menos 6 caracteres")
+                confirm_password = st.text_input("Confirme a Senha", type="password", placeholder="Repita a senha")
+                submitted = st.form_submit_button("Registar")
+                if submitted:
+                    if new_password == confirm_password:
+                        register_user(new_email, new_password)
+                    else:
+                        st.error("As senhas não coincidem.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_main_app(db, BUCKET_NAME, embeddings):
-    """Renderiza a aplicação principal após o login com o novo design."""
-    # Layout da página principal
-    st.markdown('<div class="bg-gray-100 min-h-screen">', unsafe_allow_html=True)
-    
+    """Renderiza a aplicação principal após o login."""
     with st.sidebar:
         st.title(f"Bem-vindo(a)!")
         st.caption(st.session_state.user_email)
@@ -110,7 +146,7 @@ def render_main_app(db, BUCKET_NAME, embeddings):
         st.header("Gerir Documentos")
         user_id = st.session_state.user_id
 
-        modo = st.radio("Carregar documentos:", ("Novo Upload", "Carregar Coleção"), key="modo_carregamento", horizontal=True)
+        modo = st.radio("Carregar documentos:", ("Novo Upload", "Carregar Coleção"), key="modo_carregamento")
 
         if modo == "Novo Upload":
             arquivos = st.file_uploader("Selecione PDFs", type="pdf", accept_multiple_files=True, key="upload_arquivos")
@@ -120,87 +156,59 @@ def render_main_app(db, BUCKET_NAME, embeddings):
                     st.session_state.messages = []
                     st.session_state.vector_store = vs
                     st.session_state.nomes_arquivos = nomes
+                    st.session_state.arquivos_pdf_originais = arquivos
                     st.session_state.colecao_ativa = None
                     st.rerun()
+
         else: # Carregar Coleção
             colecoes = listar_colecoes_salvas(db, user_id)
-            sel = st.selectbox("Escolha uma coleção:", colecoes, index=None, placeholder="Selecione...", key="select_colecao")
-            if st.button("Carregar Coleção", use_container_width=True, disabled=not sel):
-                vs, nomes = carregar_colecao(db, embeddings, user_id, sel)
-                if vs and nomes:
-                    st.session_state.messages = []
-                    st.session_state.vector_store = vs
-                    st.session_state.nomes_arquivos = nomes
-                    st.session_state.colecao_ativa = sel
-                    st.rerun()
+            if colecoes:
+                sel = st.selectbox("Escolha uma coleção:", colecoes, index=None, placeholder="Selecione...", key="select_colecao")
+                if st.button("Carregar Coleção", use_container_width=True, disabled=not sel):
+                    vs, nomes = carregar_colecao(db, embeddings, user_id, sel)
+                    if vs and nomes:
+                        st.session_state.messages = []
+                        st.session_state.vector_store = vs
+                        st.session_state.nomes_arquivos = nomes
+                        st.session_state.colecao_ativa = sel
+                        st.rerun()
+            else:
+                st.info("Nenhuma coleção salva.")
 
-        if st.session_state.get("vector_store") and modo == "Novo Upload":
-            st.markdown("---")
-            st.subheader("Salvar Coleção Atual")
-            nome_colecao = st.text_input("Nome para a nova coleção:", key="nome_nova_colecao")
-            if st.button("Salvar", use_container_width=True, disabled=not nome_colecao):
-                salvar_colecao_atual(db, user_id, nome_colecao, st.session_state.vector_store, st.session_state.nomes_arquivos)
+        if st.session_state.get("vector_store"):
+            if modo == "Novo Upload":
+                st.markdown("---")
+                st.subheader("Salvar Coleção Atual")
+                nome_colecao = st.text_input("Nome para a nova coleção:", key="nome_nova_colecao")
+                if st.button("Salvar", use_container_width=True, disabled=not nome_colecao):
+                    salvar_colecao_atual(db, user_id, nome_colecao, st.session_state.vector_store, st.session_state.nomes_arquivos)
         
-        st.sidebar.markdown("<div class='mt-auto'></div><hr>", unsafe_allow_html=True)
+        st.sidebar.markdown("<hr>", unsafe_allow_html=True)
         if st.sidebar.button("Logout"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
 
-    # Header da aplicação
-    st.markdown("""
-        <div class="p-4 sm:p-6 lg:p-8">
-            <div class="flex justify-between items-center">
-                <div class="flex items-center gap-4">
-                    <img src="https://i.imgur.com/aozL2jD.png" alt="Logo" class="w-12 h-12"/>
-                    <h1 class="text-3xl font-bold text-gray-800">Analisador-IA ProMax</h1>
-                </div>
-            </div>
-    """, unsafe_allow_html=True)
-    
+    st.title("💡 Analisador-IA ProMax")
     if not st.session_state.get("vector_store"):
         st.info("👈 Por favor, carregue documentos ou uma coleção para começar.")
     else:
-        # Navegação de abas personalizada
-        tab_options = ["💬 Chat", "📈 Dashboard", "📜 Resumo", "🚩 Riscos", "🗓️ Prazos", "⚖️ Conformidade", "📊 Anomalias"]
-        
-        # Guardar a aba selecionada no estado da sessão
-        if 'active_tab' not in st.session_state:
-            st.session_state.active_tab = tab_options[0]
-
-        # Componente de rádio estilizado para parecerem abas
-        selected_tab = st.radio("Navegação", tab_options, key="tab_navigation", horizontal=True, label_visibility="collapsed")
-        st.session_state.active_tab = selected_tab
-        
-        # Contentor principal
-        st.markdown('<div class="bg-white p-6 rounded-2xl shadow-sm mt-4">', unsafe_allow_html=True)
-
+        tabs = st.tabs(["💬 Chat", "📈 Dashboard", "📜 Resumo", "🚩 Riscos", "🗓️ Prazos", "⚖️ Conformidade", "📊 Anomalias"])
         vector_store = st.session_state.vector_store
         nomes_arquivos = st.session_state.nomes_arquivos
         
-        # Dicionário para chamar a função de renderização correta
-        tab_functions = {
-            "💬 Chat": render_chat_tab,
-            "📈 Dashboard": render_dashboard_tab,
-            "📜 Resumo": render_resumo_tab,
-            "🚩 Riscos": render_riscos_tab,
-            "🗓️ Prazos": render_prazos_tab,
-            "⚖️ Conformidade": render_conformidade_tab,
-            "📊 Anomalias": render_anomalias_tab
-        }
-
-        # Renderizar a aba ativa
-        tab_functions[st.session_state.active_tab](vector_store, nomes_arquivos)
-
-        st.markdown('</div>') # Fecha o contentor principal
-
-    st.markdown('</div>') # Fecha o layout da página
-
+        with tabs[0]: render_chat_tab(vector_store, nomes_arquivos)
+        with tabs[1]: render_dashboard_tab(vector_store, nomes_arquivos)
+        with tabs[2]: render_resumo_tab(vector_store, nomes_arquivos)
+        with tabs[3]: render_riscos_tab(vector_store, nomes_arquivos)
+        with tabs[4]: render_prazos_tab(vector_store, nomes_arquivos)
+        with tabs[5]: render_conformidade_tab(vector_store, nomes_arquivos)
+        with tabs[6]: render_anomalias_tab()
 
 def main():
     """Função principal que gere o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
-    load_visual_assets()
+    load_css()
     
     db, BUCKET_NAME = initialize_services()
     if not db:
@@ -217,6 +225,7 @@ def main():
     else:
         if "vector_store" not in st.session_state:
             st.session_state.vector_store = None
+        
         render_main_app(db, BUCKET_NAME, embeddings)
 
 if __name__ == "__main__":
