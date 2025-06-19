@@ -666,242 +666,242 @@ else:
                 else: st.warning("Carregue documentos para usar a função de resumo.")
         
 		with tab_riscos:
-			st.header("🚩 Análise de Cláusulas de Risco")
-			st.markdown("Analisa os documentos carregados na sessão atual em busca de cláusulas potencialmente arriscadas.")
-			if arquivos_pdf_originais_global:
-				if st.button("🔎 Analisar Riscos em Todos os Documentos Carregados", key="btn_analise_riscos_v3", use_container_width=True):
-					st.session_state.analise_riscos_resultados = {} # Limpar resultados anteriores
-					textos_completos_docs_riscos = []
-					# Re-ler os arquivos para garantir que temos o conteúdo completo
-					for arquivo_pdf_obj in arquivos_pdf_originais_global:
-						try:
-							arquivo_pdf_obj.seek(0) # Resetar ponteiro
-							pdf_bytes_risco = arquivo_pdf_obj.read()
-							texto_doc_risco = ""
-							with fitz.open(stream=pdf_bytes_risco, filetype="pdf") as doc_fitz_risco:
-								for page_risco in doc_fitz_risco:
-									texto_doc_risco += page_risco.get_text() + "\n"
-							if texto_doc_risco.strip():
-								 textos_completos_docs_riscos.append({"nome": arquivo_pdf_obj.name, "texto": texto_doc_risco})
-							else: # Tentar Gemini se PyMuPDF falhar
-								st.info(f"Texto não extraído por PyMuPDF para análise de risco de {arquivo_pdf_obj.name}. Tentando Gemini Vision...")
-								texto_gemini_risco = ""
-								llm_vision_risco = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1)
-								with fitz.open(stream=pdf_bytes_risco, filetype="pdf") as doc_fitz_gemini_risco:
-									for page_num_g_risco in range(len(doc_fitz_gemini_risco)):
-										page_g_risco = doc_fitz_gemini_risco.load_page(page_num_g_risco)
-										pix_g_risco = page_g_risco.get_pixmap(dpi=200)
-										img_bytes_g_risco = pix_g_risco.tobytes("png")
-										base64_img_g_risco = base64.b64encode(img_bytes_g_risco).decode('utf-8')
-										msg_g_risco = HumanMessage(content=[{"type": "text", "text": "Extraia o texto desta página."}, {"type": "image_url", "image_url": f"data:image/png;base64,{base64_img_g_risco}"}])
-										with st.spinner(f"Gemini (riscos) processando pág {page_num_g_risco+1} de {arquivo_pdf_obj.name}..."):
-											ai_msg_g_risco = llm_vision_risco.invoke([msg_g_risco])
-										if isinstance(ai_msg_g_risco, AIMessage) and ai_msg_g_risco.content and isinstance(ai_msg_g_risco.content, str):
-											texto_gemini_risco += ai_msg_g_risco.content + "\n\n"
-										time.sleep(1)
-								if texto_gemini_risco.strip():
-									textos_completos_docs_riscos.append({"nome": arquivo_pdf_obj.name, "texto": texto_gemini_risco})
-								else:
-									st.warning(f"Não foi possível extrair texto para análise de risco de {arquivo_pdf_obj.name} mesmo com Gemini.")
-						except Exception as e_leitura_risco:
-							st.error(f"Erro ao ler {arquivo_pdf_obj.name} para análise de risco: {e_leitura_risco}")
-	
-					resultados_analise_riscos_temp = {}
-					if textos_completos_docs_riscos:
-						barra_riscos = st.progress(0, text="Analisando riscos...")
-						for idx, doc_info_risco in enumerate(textos_completos_docs_riscos):
-							barra_riscos.progress((idx + 1) / len(textos_completos_docs_riscos), text=f"Analisando riscos em: {doc_info_risco['nome']}...")
-							resultado_risco_doc = analisar_documento_para_riscos(doc_info_risco["texto"], doc_info_risco["nome"])
-							resultados_analise_riscos_temp[doc_info_risco["nome"]] = resultado_risco_doc
-							time.sleep(1.5) 
-						barra_riscos.empty()
-						st.session_state.analise_riscos_resultados = resultados_analise_riscos_temp
-						st.success("Análise de riscos concluída.")
-					else:
-						st.warning("Nenhum texto pôde ser extraído dos documentos para análise de riscos.")
-					st.rerun()
-	
-				if st.session_state.get("analise_riscos_resultados"):
-					st.markdown("---")
-					for nome_arquivo_risco, analise_risco in st.session_state.analise_riscos_resultados.items():
-						with st.expander(f"Riscos Identificados em: {nome_arquivo_risco}", expanded=True): st.markdown(analise_risco)
-			elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
-				st.warning("A Análise de Riscos detalhada funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
-			else: st.info("Faça o upload de documentos para ativar a análise de riscos.")
-	
-		with tab_prazos:
-			st.header("🗓️ Monitoramento de Prazos e Vencimentos")
-			st.markdown("Extrai e organiza datas e prazos importantes dos documentos carregados na sessão atual.")
-			if arquivos_pdf_originais_global:
-				if st.button("🔍 Analisar Prazos e Datas Importantes", key="btn_analise_prazos_v3", use_container_width=True):
-					textos_completos_para_datas_prazos = []
-					# Re-ler os arquivos
-					for arquivo_pdf_obj_prazo in arquivos_pdf_originais_global:
-						try:
-							arquivo_pdf_obj_prazo.seek(0)
-							pdf_bytes_prazo = arquivo_pdf_obj_prazo.read()
-							texto_doc_prazo = ""
-							with fitz.open(stream=pdf_bytes_prazo, filetype="pdf") as doc_fitz_prazo:
-								for page_prazo in doc_fitz_prazo:
-									texto_doc_prazo += page_prazo.get_text() + "\n"
-							if texto_doc_prazo.strip():
-								textos_completos_para_datas_prazos.append({"nome": arquivo_pdf_obj_prazo.name, "texto": texto_doc_prazo})
-							else: # Tentar Gemini se PyMuPDF falhar
-								st.info(f"Texto não extraído por PyMuPDF para análise de prazos de {arquivo_pdf_obj_prazo.name}. Tentando Gemini Vision...")
-								texto_gemini_prazo = ""
-								llm_vision_prazo = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1)
-								with fitz.open(stream=pdf_bytes_prazo, filetype="pdf") as doc_fitz_gemini_prazo:
-									for page_num_g_prazo in range(len(doc_fitz_gemini_prazo)):
-										page_g_prazo = doc_fitz_gemini_prazo.load_page(page_num_g_prazo)
-										pix_g_prazo = page_g_prazo.get_pixmap(dpi=200)
-										img_bytes_g_prazo = pix_g_prazo.tobytes("png")
-										base64_img_g_prazo = base64.b64encode(img_bytes_g_prazo).decode('utf-8')
-										msg_g_prazo = HumanMessage(content=[{"type": "text", "text": "Extraia o texto desta página."}, {"type": "image_url", "image_url": f"data:image/png;base64,{base64_img_g_prazo}"}])
-										with st.spinner(f"Gemini (prazos) processando pág {page_num_g_prazo+1} de {arquivo_pdf_obj_prazo.name}..."):
-											ai_msg_g_prazo = llm_vision_prazo.invoke([msg_g_prazo])
-										if isinstance(ai_msg_g_prazo, AIMessage) and ai_msg_g_prazo.content and isinstance(ai_msg_g_prazo.content, str):
-											texto_gemini_prazo += ai_msg_g_prazo.content + "\n\n"
-										time.sleep(1)
-								if texto_gemini_prazo.strip():
-									textos_completos_para_datas_prazos.append({"nome": arquivo_pdf_obj_prazo.name, "texto": texto_gemini_prazo})
-								else:
-									st.warning(f"Não foi possível extrair texto para análise de prazos de {arquivo_pdf_obj_prazo.name} mesmo com Gemini.")
-						except Exception as e_leitura_prazo:
-							st.error(f"Erro ao ler {arquivo_pdf_obj_prazo.name} para análise de prazos: {e_leitura_prazo}")
-					
-					if textos_completos_para_datas_prazos:
-						eventos_extraidos = extrair_eventos_dos_contratos(textos_completos_para_datas_prazos)
-						if eventos_extraidos:
-							df_eventos = pd.DataFrame(eventos_extraidos)
-							df_eventos['Data Objeto'] = pd.to_datetime(df_eventos['Data Objeto'], errors='coerce')
-							st.session_state.eventos_contratuais_df = df_eventos.sort_values(by="Data Objeto", ascending=True, na_position='last')
-						else: st.session_state.eventos_contratuais_df = pd.DataFrame()
-					else:
-						st.warning("Nenhum texto pôde ser extraído dos documentos para análise de prazos.")
-						st.session_state.eventos_contratuais_df = pd.DataFrame()
-					st.rerun()
-	
-				if 'eventos_contratuais_df' in st.session_state and st.session_state.eventos_contratuais_df is not None:
-					df_display_eventos = st.session_state.eventos_contratuais_df.copy()
-					if not df_display_eventos.empty:
-						df_display_eventos['Data Formatada'] = pd.NaT # Inicializar coluna
-						if 'Data Objeto' in df_display_eventos.columns and pd.api.types.is_datetime64_any_dtype(df_display_eventos['Data Objeto']):
-							 df_display_eventos['Data Formatada'] = df_display_eventos['Data Objeto'].dt.strftime('%d/%m/%Y').fillna('N/A')
-						else: # Fallback se Data Objeto não for datetime
-							df_display_eventos['Data Formatada'] = df_display_eventos.get('Data Informada', pd.Series(['N/A'] * len(df_display_eventos)))
-	
-						st.subheader("Todos os Eventos e Prazos Identificados")
-						colunas_para_exibir_eventos = ['Arquivo Fonte', 'Evento', 'Data Informada', 'Data Formatada', 'Trecho Relevante']
-						colunas_existentes_eventos = [col for col in colunas_para_exibir_eventos if col in df_display_eventos.columns]
-						st.dataframe(df_display_eventos[colunas_existentes_eventos], height=400, use_container_width=True)
-						
-						if 'Data Objeto' in df_display_eventos.columns and pd.api.types.is_datetime64_any_dtype(df_display_eventos['Data Objeto']) and df_display_eventos['Data Objeto'].notna().any():
-							st.subheader("Próximos Eventos (Próximos 90 dias)")
-							hoje_datetime = pd.Timestamp(datetime.now().date()) # Usar pd.Timestamp para comparação correta
-							
-							proximos_eventos = df_display_eventos[
-								(df_display_eventos['Data Objeto'] >= hoje_datetime) &
-								(df_display_eventos['Data Objeto'] <= (hoje_datetime + pd.Timedelta(days=90)))
-							].copy() # .copy() para evitar SettingWithCopyWarning
-							
-							if not proximos_eventos.empty: 
-								st.table(proximos_eventos[['Arquivo Fonte', 'Evento', 'Data Formatada']])
-							else: st.info("Nenhum evento encontrado para os próximos 90 dias.")
-						else: st.info("Nenhuma data válida encontrada para filtrar próximos eventos ou a coluna 'Data Objeto' está ausente/malformada.")
-					elif ("btn_analise_prazos_v3" in st.session_state and st.session_state.btn_analise_prazos_v3):
-						 st.warning("A extração de datas não retornou resultados. Verifique os avisos ou os arquivos.")
-			elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
-				st.warning("O Monitoramento de Prazos funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
-			else: st.info("Faça o upload de documentos para ativar o monitoramento de prazos.")
-	
-		with tab_conformidade:
-			st.header("⚖️ Verificador de Conformidade Contratual")
-			st.markdown("Compare um documento com um documento de referência para identificar desalinhamentos.")
-			if arquivos_pdf_originais_global and len(arquivos_pdf_originais_global) >= 1:
-				nomes_arquivos_para_selecao_conf = [f.name for f in arquivos_pdf_originais_global]
-				col_ref_conf, col_ana_conf = st.columns(2)
-				with col_ref_conf:
-					doc_referencia_nome_conf = st.selectbox("1. Documento de Referência:", options=nomes_arquivos_para_selecao_conf, key="select_doc_ref_conf_v3", index=None, placeholder="Selecione o doc. de referência")
-				
-				opcoes_docs_analisar_conf = [n for n in nomes_arquivos_para_selecao_conf if n != doc_referencia_nome_conf] if doc_referencia_nome_conf else nomes_arquivos_para_selecao_conf
-				
-				if not opcoes_docs_analisar_conf and len(arquivos_pdf_originais_global) > 1 and doc_referencia_nome_conf :
-					 st.warning("Selecione um documento de referência diferente para habilitar a análise, ou carregue mais documentos.")
-				elif not arquivos_pdf_originais_global or len(arquivos_pdf_originais_global) < 2:
-					 st.warning("Carregue pelo menos dois documentos para fazer uma comparação.")
-	
-				if opcoes_docs_analisar_conf :
-					with col_ana_conf:
-						docs_a_analisar_nomes_conf = st.multiselect("2. Documento(s) a Analisar:", options=opcoes_docs_analisar_conf, key="multiselect_docs_ana_conf_v3", placeholder="Selecione o(s) doc(s) para análise")
-					
-					if st.button("🔎 Verificar Conformidade", key="btn_ver_conf_v3", use_container_width=True, disabled=not(doc_referencia_nome_conf and docs_a_analisar_nomes_conf)):
-						st.session_state.conformidade_resultados = {} # Limpar
-						doc_referencia_obj_conf = next((arq for arq in arquivos_pdf_originais_global if arq.name == doc_referencia_nome_conf), None)
-						texto_doc_referencia_conf = ""
-						if doc_referencia_obj_conf:
+				st.header("🚩 Análise de Cláusulas de Risco")
+				st.markdown("Analisa os documentos carregados na sessão atual em busca de cláusulas potencialmente arriscadas.")
+				if arquivos_pdf_originais_global:
+					if st.button("🔎 Analisar Riscos em Todos os Documentos Carregados", key="btn_analise_riscos_v3", use_container_width=True):
+						st.session_state.analise_riscos_resultados = {} # Limpar resultados anteriores
+						textos_completos_docs_riscos = []
+						# Re-ler os arquivos para garantir que temos o conteúdo completo
+						for arquivo_pdf_obj in arquivos_pdf_originais_global:
 							try:
-								doc_referencia_obj_conf.seek(0)
-								pdf_bytes_ref = doc_referencia_obj_conf.read()
-								with fitz.open(stream=pdf_bytes_ref, filetype="pdf") as doc_fitz_ref:
-									for page_ref in doc_fitz_ref: texto_doc_referencia_conf += page_ref.get_text() + "\n"
-							except Exception as e_read_ref:
-								st.error(f"Erro ao ler doc de referência {doc_referencia_obj_conf.name}: {e_read_ref}")
-						
-						if not texto_doc_referencia_conf.strip(): st.error(f"Não foi possível ler o conteúdo do documento de referência: {doc_referencia_nome_conf}")
+								arquivo_pdf_obj.seek(0) # Resetar ponteiro
+								pdf_bytes_risco = arquivo_pdf_obj.read()
+								texto_doc_risco = ""
+								with fitz.open(stream=pdf_bytes_risco, filetype="pdf") as doc_fitz_risco:
+									for page_risco in doc_fitz_risco:
+										texto_doc_risco += page_risco.get_text() + "\n"
+								if texto_doc_risco.strip():
+									 textos_completos_docs_riscos.append({"nome": arquivo_pdf_obj.name, "texto": texto_doc_risco})
+								else: # Tentar Gemini se PyMuPDF falhar
+									st.info(f"Texto não extraído por PyMuPDF para análise de risco de {arquivo_pdf_obj.name}. Tentando Gemini Vision...")
+									texto_gemini_risco = ""
+									llm_vision_risco = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1)
+									with fitz.open(stream=pdf_bytes_risco, filetype="pdf") as doc_fitz_gemini_risco:
+										for page_num_g_risco in range(len(doc_fitz_gemini_risco)):
+											page_g_risco = doc_fitz_gemini_risco.load_page(page_num_g_risco)
+											pix_g_risco = page_g_risco.get_pixmap(dpi=200)
+											img_bytes_g_risco = pix_g_risco.tobytes("png")
+											base64_img_g_risco = base64.b64encode(img_bytes_g_risco).decode('utf-8')
+											msg_g_risco = HumanMessage(content=[{"type": "text", "text": "Extraia o texto desta página."}, {"type": "image_url", "image_url": f"data:image/png;base64,{base64_img_g_risco}"}])
+											with st.spinner(f"Gemini (riscos) processando pág {page_num_g_risco+1} de {arquivo_pdf_obj.name}..."):
+												ai_msg_g_risco = llm_vision_risco.invoke([msg_g_risco])
+											if isinstance(ai_msg_g_risco, AIMessage) and ai_msg_g_risco.content and isinstance(ai_msg_g_risco.content, str):
+												texto_gemini_risco += ai_msg_g_risco.content + "\n\n"
+											time.sleep(1)
+									if texto_gemini_risco.strip():
+										textos_completos_docs_riscos.append({"nome": arquivo_pdf_obj.name, "texto": texto_gemini_risco})
+									else:
+										st.warning(f"Não foi possível extrair texto para análise de risco de {arquivo_pdf_obj.name} mesmo com Gemini.")
+							except Exception as e_leitura_risco:
+								st.error(f"Erro ao ler {arquivo_pdf_obj.name} para análise de risco: {e_leitura_risco}")
+
+						resultados_analise_riscos_temp = {}
+						if textos_completos_docs_riscos:
+							barra_riscos = st.progress(0, text="Analisando riscos...")
+							for idx, doc_info_risco in enumerate(textos_completos_docs_riscos):
+								barra_riscos.progress((idx + 1) / len(textos_completos_docs_riscos), text=f"Analisando riscos em: {doc_info_risco['nome']}...")
+								resultado_risco_doc = analisar_documento_para_riscos(doc_info_risco["texto"], doc_info_risco["nome"])
+								resultados_analise_riscos_temp[doc_info_risco["nome"]] = resultado_risco_doc
+								time.sleep(1.5) 
+							barra_riscos.empty()
+							st.session_state.analise_riscos_resultados = resultados_analise_riscos_temp
+							st.success("Análise de riscos concluída.")
 						else:
-							barra_conf = st.progress(0, text="Analisando conformidade...")
-							for idx_conf, nome_doc_analisar_conf in enumerate(docs_a_analisar_nomes_conf):
-								barra_conf.progress((idx_conf + 1) / len(docs_a_analisar_nomes_conf), text=f"Analisando '{nome_doc_analisar_conf}' vs '{doc_referencia_nome_conf}'...")
-								doc_analisar_obj_conf = next((arq for arq in arquivos_pdf_originais_global if arq.name == nome_doc_analisar_conf), None)
-								if doc_analisar_obj_conf:
-									texto_doc_analisar_conf = ""
-									try:
-										doc_analisar_obj_conf.seek(0)
-										pdf_bytes_ana = doc_analisar_obj_conf.read()
-										with fitz.open(stream=pdf_bytes_ana, filetype="pdf") as doc_fitz_ana:
-											for page_ana in doc_fitz_ana: texto_doc_analisar_conf += page_ana.get_text() + "\n"
-									except Exception as e_read_ana:
-										 st.error(f"Erro ao ler doc a analisar {doc_analisar_obj_conf.name}: {e_read_ana}")
-	
-									if texto_doc_analisar_conf.strip():
-										resultado_conformidade_doc = verificar_conformidade_documento(texto_doc_referencia_conf, doc_referencia_nome_conf, texto_doc_analisar_conf, nome_doc_analisar_conf)
-										st.session_state.conformidade_resultados[f"{nome_doc_analisar_conf}_vs_{doc_referencia_nome_conf}"] = resultado_conformidade_doc
-										time.sleep(2) 
-									else: st.error(f"Não foi possível ler o conteúdo do documento a analisar: {nome_doc_analisar_conf}")
-								else: st.error(f"Objeto do arquivo '{nome_doc_analisar_conf}' não encontrado (erro interno).")
-							barra_conf.empty()
-							st.success("Análise de conformidade concluída.")
-							st.rerun()
-	
-				if st.session_state.get("conformidade_resultados"):
-					st.markdown("---")
-					for chave_analise_conf, relatorio_conf in st.session_state.conformidade_resultados.items():
-						with st.expander(f"Relatório: {chave_analise_conf.replace('_vs_', ' vs ')}", expanded=True): st.markdown(relatorio_conf)
-			elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
-				st.warning("A Verificação de Conformidade funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
-			else: st.info("Faça o upload de documentos para ativar a verificação de conformidade.")
-		
-		with tab_anomalias:
-			st.header("📊 Detecção de Anomalias Contratuais")
-			st.markdown("Identifica dados que fogem do padrão no conjunto de contratos carregados. "
-						"**Nota:** Esta funcionalidade depende da qualidade e consistência da extração de dados realizada na aba '📈 Dashboard'.")
-	
-			df_para_anomalias_tab = st.session_state.get("df_dashboard")
-	
-			if df_para_anomalias_tab is None or df_para_anomalias_tab.empty:
-				st.warning("Os dados para análise de anomalias ainda não foram gerados. "
-						   "Por favor, vá para a aba '📈 Dashboard' e clique em "
-						   "'🚀 Gerar Dados para Dashboard e Anomalias' primeiro.")
-			else:
-				st.info("Analisando os dados extraídos da aba 'Dashboard' em busca de anomalias.")
-				if st.button("🚨 Detectar Anomalias Agora", key="btn_detectar_anomalias_v3", use_container_width=True):
-					st.session_state.anomalias_resultados = detectar_anomalias_no_dataframe(df_para_anomalias_tab.copy())
-					st.rerun()
-				
-				if st.session_state.get("anomalias_resultados"):
-					st.subheader("Resultados da Detecção de Anomalias:")
-					if isinstance(st.session_state.anomalias_resultados, list) and len(st.session_state.anomalias_resultados) > 0:
-						for anomalia_item in st.session_state.anomalias_resultados:
-							st.markdown(f"- {anomalia_item}")
-					else:
-						st.info("Nenhuma anomalia significativa detectada com os critérios atuais, ou os dados não foram suficientes para a análise.")
+							st.warning("Nenhum texto pôde ser extraído dos documentos para análise de riscos.")
+						st.rerun()
+
+					if st.session_state.get("analise_riscos_resultados"):
+						st.markdown("---")
+						for nome_arquivo_risco, analise_risco in st.session_state.analise_riscos_resultados.items():
+							with st.expander(f"Riscos Identificados em: {nome_arquivo_risco}", expanded=True): st.markdown(analise_risco)
+				elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
+					st.warning("A Análise de Riscos detalhada funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
+				else: st.info("Faça o upload de documentos para ativar a análise de riscos.")
+
+			with tab_prazos:
+				st.header("🗓️ Monitoramento de Prazos e Vencimentos")
+				st.markdown("Extrai e organiza datas e prazos importantes dos documentos carregados na sessão atual.")
+				if arquivos_pdf_originais_global:
+					if st.button("🔍 Analisar Prazos e Datas Importantes", key="btn_analise_prazos_v3", use_container_width=True):
+						textos_completos_para_datas_prazos = []
+						# Re-ler os arquivos
+						for arquivo_pdf_obj_prazo in arquivos_pdf_originais_global:
+							try:
+								arquivo_pdf_obj_prazo.seek(0)
+								pdf_bytes_prazo = arquivo_pdf_obj_prazo.read()
+								texto_doc_prazo = ""
+								with fitz.open(stream=pdf_bytes_prazo, filetype="pdf") as doc_fitz_prazo:
+									for page_prazo in doc_fitz_prazo:
+										texto_doc_prazo += page_prazo.get_text() + "\n"
+								if texto_doc_prazo.strip():
+									textos_completos_para_datas_prazos.append({"nome": arquivo_pdf_obj_prazo.name, "texto": texto_doc_prazo})
+								else: # Tentar Gemini se PyMuPDF falhar
+									st.info(f"Texto não extraído por PyMuPDF para análise de prazos de {arquivo_pdf_obj_prazo.name}. Tentando Gemini Vision...")
+									texto_gemini_prazo = ""
+									llm_vision_prazo = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1)
+									with fitz.open(stream=pdf_bytes_prazo, filetype="pdf") as doc_fitz_gemini_prazo:
+										for page_num_g_prazo in range(len(doc_fitz_gemini_prazo)):
+											page_g_prazo = doc_fitz_gemini_prazo.load_page(page_num_g_prazo)
+											pix_g_prazo = page_g_prazo.get_pixmap(dpi=200)
+											img_bytes_g_prazo = pix_g_prazo.tobytes("png")
+											base64_img_g_prazo = base64.b64encode(img_bytes_g_prazo).decode('utf-8')
+											msg_g_prazo = HumanMessage(content=[{"type": "text", "text": "Extraia o texto desta página."}, {"type": "image_url", "image_url": f"data:image/png;base64,{base64_img_g_prazo}"}])
+											with st.spinner(f"Gemini (prazos) processando pág {page_num_g_prazo+1} de {arquivo_pdf_obj_prazo.name}..."):
+												ai_msg_g_prazo = llm_vision_prazo.invoke([msg_g_prazo])
+											if isinstance(ai_msg_g_prazo, AIMessage) and ai_msg_g_prazo.content and isinstance(ai_msg_g_prazo.content, str):
+												texto_gemini_prazo += ai_msg_g_prazo.content + "\n\n"
+											time.sleep(1)
+									if texto_gemini_prazo.strip():
+										textos_completos_para_datas_prazos.append({"nome": arquivo_pdf_obj_prazo.name, "texto": texto_gemini_prazo})
+									else:
+										st.warning(f"Não foi possível extrair texto para análise de prazos de {arquivo_pdf_obj_prazo.name} mesmo com Gemini.")
+							except Exception as e_leitura_prazo:
+								st.error(f"Erro ao ler {arquivo_pdf_obj_prazo.name} para análise de prazos: {e_leitura_prazo}")
+						
+						if textos_completos_para_datas_prazos:
+							eventos_extraidos = extrair_eventos_dos_contratos(textos_completos_para_datas_prazos)
+							if eventos_extraidos:
+								df_eventos = pd.DataFrame(eventos_extraidos)
+								df_eventos['Data Objeto'] = pd.to_datetime(df_eventos['Data Objeto'], errors='coerce')
+								st.session_state.eventos_contratuais_df = df_eventos.sort_values(by="Data Objeto", ascending=True, na_position='last')
+							else: st.session_state.eventos_contratuais_df = pd.DataFrame()
+						else:
+							st.warning("Nenhum texto pôde ser extraído dos documentos para análise de prazos.")
+							st.session_state.eventos_contratuais_df = pd.DataFrame()
+						st.rerun()
+
+					if 'eventos_contratuais_df' in st.session_state and st.session_state.eventos_contratuais_df is not None:
+						df_display_eventos = st.session_state.eventos_contratuais_df.copy()
+						if not df_display_eventos.empty:
+							df_display_eventos['Data Formatada'] = pd.NaT # Inicializar coluna
+							if 'Data Objeto' in df_display_eventos.columns and pd.api.types.is_datetime64_any_dtype(df_display_eventos['Data Objeto']):
+								 df_display_eventos['Data Formatada'] = df_display_eventos['Data Objeto'].dt.strftime('%d/%m/%Y').fillna('N/A')
+							else: # Fallback se Data Objeto não for datetime
+								df_display_eventos['Data Formatada'] = df_display_eventos.get('Data Informada', pd.Series(['N/A'] * len(df_display_eventos)))
+
+							st.subheader("Todos os Eventos e Prazos Identificados")
+							colunas_para_exibir_eventos = ['Arquivo Fonte', 'Evento', 'Data Informada', 'Data Formatada', 'Trecho Relevante']
+							colunas_existentes_eventos = [col for col in colunas_para_exibir_eventos if col in df_display_eventos.columns]
+							st.dataframe(df_display_eventos[colunas_existentes_eventos], height=400, use_container_width=True)
+							
+							if 'Data Objeto' in df_display_eventos.columns and pd.api.types.is_datetime64_any_dtype(df_display_eventos['Data Objeto']) and df_display_eventos['Data Objeto'].notna().any():
+								st.subheader("Próximos Eventos (Próximos 90 dias)")
+								hoje_datetime = pd.Timestamp(datetime.now().date()) # Usar pd.Timestamp para comparação correta
+								
+								proximos_eventos = df_display_eventos[
+									(df_display_eventos['Data Objeto'] >= hoje_datetime) &
+									(df_display_eventos['Data Objeto'] <= (hoje_datetime + pd.Timedelta(days=90)))
+								].copy() # .copy() para evitar SettingWithCopyWarning
+								
+								if not proximos_eventos.empty: 
+									st.table(proximos_eventos[['Arquivo Fonte', 'Evento', 'Data Formatada']])
+								else: st.info("Nenhum evento encontrado para os próximos 90 dias.")
+							else: st.info("Nenhuma data válida encontrada para filtrar próximos eventos ou a coluna 'Data Objeto' está ausente/malformada.")
+						elif ("btn_analise_prazos_v3" in st.session_state and st.session_state.btn_analise_prazos_v3):
+							 st.warning("A extração de datas não retornou resultados. Verifique os avisos ou os arquivos.")
+				elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
+					st.warning("O Monitoramento de Prazos funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
+				else: st.info("Faça o upload de documentos para ativar o monitoramento de prazos.")
+
+			with tab_conformidade:
+				st.header("⚖️ Verificador de Conformidade Contratual")
+				st.markdown("Compare um documento com um documento de referência para identificar desalinhamentos.")
+				if arquivos_pdf_originais_global and len(arquivos_pdf_originais_global) >= 1:
+					nomes_arquivos_para_selecao_conf = [f.name for f in arquivos_pdf_originais_global]
+					col_ref_conf, col_ana_conf = st.columns(2)
+					with col_ref_conf:
+						doc_referencia_nome_conf = st.selectbox("1. Documento de Referência:", options=nomes_arquivos_para_selecao_conf, key="select_doc_ref_conf_v3", index=None, placeholder="Selecione o doc. de referência")
+					
+					opcoes_docs_analisar_conf = [n for n in nomes_arquivos_para_selecao_conf if n != doc_referencia_nome_conf] if doc_referencia_nome_conf else nomes_arquivos_para_selecao_conf
+					
+					if not opcoes_docs_analisar_conf and len(arquivos_pdf_originais_global) > 1 and doc_referencia_nome_conf :
+						 st.warning("Selecione um documento de referência diferente para habilitar a análise, ou carregue mais documentos.")
+					elif not arquivos_pdf_originais_global or len(arquivos_pdf_originais_global) < 2:
+						 st.warning("Carregue pelo menos dois documentos para fazer uma comparação.")
+
+					if opcoes_docs_analisar_conf :
+						with col_ana_conf:
+							docs_a_analisar_nomes_conf = st.multiselect("2. Documento(s) a Analisar:", options=opcoes_docs_analisar_conf, key="multiselect_docs_ana_conf_v3", placeholder="Selecione o(s) doc(s) para análise")
+						
+						if st.button("🔎 Verificar Conformidade", key="btn_ver_conf_v3", use_container_width=True, disabled=not(doc_referencia_nome_conf and docs_a_analisar_nomes_conf)):
+							st.session_state.conformidade_resultados = {} # Limpar
+							doc_referencia_obj_conf = next((arq for arq in arquivos_pdf_originais_global if arq.name == doc_referencia_nome_conf), None)
+							texto_doc_referencia_conf = ""
+							if doc_referencia_obj_conf:
+								try:
+									doc_referencia_obj_conf.seek(0)
+									pdf_bytes_ref = doc_referencia_obj_conf.read()
+									with fitz.open(stream=pdf_bytes_ref, filetype="pdf") as doc_fitz_ref:
+										for page_ref in doc_fitz_ref: texto_doc_referencia_conf += page_ref.get_text() + "\n"
+								except Exception as e_read_ref:
+									st.error(f"Erro ao ler doc de referência {doc_referencia_obj_conf.name}: {e_read_ref}")
+							
+							if not texto_doc_referencia_conf.strip(): st.error(f"Não foi possível ler o conteúdo do documento de referência: {doc_referencia_nome_conf}")
+							else:
+								barra_conf = st.progress(0, text="Analisando conformidade...")
+								for idx_conf, nome_doc_analisar_conf in enumerate(docs_a_analisar_nomes_conf):
+									barra_conf.progress((idx_conf + 1) / len(docs_a_analisar_nomes_conf), text=f"Analisando '{nome_doc_analisar_conf}' vs '{doc_referencia_nome_conf}'...")
+									doc_analisar_obj_conf = next((arq for arq in arquivos_pdf_originais_global if arq.name == nome_doc_analisar_conf), None)
+									if doc_analisar_obj_conf:
+										texto_doc_analisar_conf = ""
+										try:
+											doc_analisar_obj_conf.seek(0)
+											pdf_bytes_ana = doc_analisar_obj_conf.read()
+											with fitz.open(stream=pdf_bytes_ana, filetype="pdf") as doc_fitz_ana:
+												for page_ana in doc_fitz_ana: texto_doc_analisar_conf += page_ana.get_text() + "\n"
+										except Exception as e_read_ana:
+											 st.error(f"Erro ao ler doc a analisar {doc_analisar_obj_conf.name}: {e_read_ana}")
+
+										if texto_doc_analisar_conf.strip():
+											resultado_conformidade_doc = verificar_conformidade_documento(texto_doc_referencia_conf, doc_referencia_nome_conf, texto_doc_analisar_conf, nome_doc_analisar_conf)
+											st.session_state.conformidade_resultados[f"{nome_doc_analisar_conf}_vs_{doc_referencia_nome_conf}"] = resultado_conformidade_doc
+											time.sleep(2) 
+										else: st.error(f"Não foi possível ler o conteúdo do documento a analisar: {nome_doc_analisar_conf}")
+									else: st.error(f"Objeto do arquivo '{nome_doc_analisar_conf}' não encontrado (erro interno).")
+								barra_conf.empty()
+								st.success("Análise de conformidade concluída.")
+								st.rerun()
+
+					if st.session_state.get("conformidade_resultados"):
+						st.markdown("---")
+						for chave_analise_conf, relatorio_conf in st.session_state.conformidade_resultados.items():
+							with st.expander(f"Relatório: {chave_analise_conf.replace('_vs_', ' vs ')}", expanded=True): st.markdown(relatorio_conf)
+				elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
+					st.warning("A Verificação de Conformidade funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
+				else: st.info("Faça o upload de documentos para ativar a verificação de conformidade.")
+			
+			with tab_anomalias:
+				st.header("📊 Detecção de Anomalias Contratuais")
+				st.markdown("Identifica dados que fogem do padrão no conjunto de contratos carregados. "
+							"**Nota:** Esta funcionalidade depende da qualidade e consistência da extração de dados realizada na aba '📈 Dashboard'.")
+
+				df_para_anomalias_tab = st.session_state.get("df_dashboard")
+
+				if df_para_anomalias_tab is None or df_para_anomalias_tab.empty:
+					st.warning("Os dados para análise de anomalias ainda não foram gerados. "
+							   "Por favor, vá para a aba '📈 Dashboard' e clique em "
+							   "'🚀 Gerar Dados para Dashboard e Anomalias' primeiro.")
+				else:
+					st.info("Analisando os dados extraídos da aba 'Dashboard' em busca de anomalias.")
+					if st.button("🚨 Detectar Anomalias Agora", key="btn_detectar_anomalias_v3", use_container_width=True):
+						st.session_state.anomalias_resultados = detectar_anomalias_no_dataframe(df_para_anomalias_tab.copy())
+						st.rerun()
+					
+					if st.session_state.get("anomalias_resultados"):
+						st.subheader("Resultados da Detecção de Anomalias:")
+						if isinstance(st.session_state.anomalias_resultados, list) and len(st.session_state.anomalias_resultados) > 0:
+							for anomalia_item in st.session_state.anomalias_resultados:
+								st.markdown(f"- {anomalia_item}")
+						else:
+							st.info("Nenhuma anomalia significativa detectada com os critérios atuais, ou os dados não foram suficientes para a análise.")
