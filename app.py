@@ -643,28 +643,28 @@ else:
                 st.dataframe(st.session_state.df_dashboard, use_container_width=True)
 
         with tab_resumo:
-			st.header("📜 Resumo Executivo de um Contrato")
-			if arquivos_pdf_originais_global: # Resumo funciona melhor com os arquivos originais em mãos
-				lista_nomes_arquivos_resumo = [f.name for f in arquivos_pdf_originais_global]
-				if lista_nomes_arquivos_resumo:
-					arquivo_selecionado_nome_resumo = st.selectbox("Escolha um contrato para resumir:", options=lista_nomes_arquivos_resumo, key="select_resumo_tab_v3", index=None, placeholder="Selecione um arquivo")
-					if arquivo_selecionado_nome_resumo and st.button("✍️ Gerar Resumo Executivo", key="btn_resumo_tab_v3", use_container_width=True):
-						arquivo_obj_selecionado = next((arq for arq in arquivos_pdf_originais_global if arq.name == arquivo_selecionado_nome_resumo), None)
-						if arquivo_obj_selecionado:
-							arquivo_bytes = arquivo_obj_selecionado.getvalue() # Obter bytes do UploadedFile
-							resumo = gerar_resumo_executivo(arquivo_bytes, arquivo_obj_selecionado.name)
-							st.session_state.resumo_gerado = resumo
-							st.session_state.arquivo_resumido = arquivo_selecionado_nome_resumo
-							st.rerun()
-						else: st.error("Arquivo selecionado não encontrado (isso não deveria acontecer).")
-					
-					if st.session_state.get("arquivo_resumido") == arquivo_selecionado_nome_resumo and st.session_state.get("resumo_gerado"):
-						st.subheader(f"Resumo do Contrato: {st.session_state.arquivo_resumido}"); st.markdown(st.session_state.resumo_gerado)
-				else: st.info("Nenhum arquivo carregado disponível para resumo nesta sessão.")
-			elif nomes_arquivos_global: # Se carregou de coleção
-				 st.info("A função de resumo individual de arquivos é otimizada para uploads novos. Para coleções, use o chat para pedir resumos.")
-			else: st.warning("Carregue documentos para usar a função de resumo.")
-	
+                st.header("📜 Resumo Executivo de um Contrato")
+                if arquivos_pdf_originais_global: # Resumo funciona melhor com os arquivos originais em mãos
+                    lista_nomes_arquivos_resumo = [f.name for f in arquivos_pdf_originais_global]
+                    if lista_nomes_arquivos_resumo:
+                        arquivo_selecionado_nome_resumo = st.selectbox("Escolha um contrato para resumir:", options=lista_nomes_arquivos_resumo, key="select_resumo_tab_v3", index=None, placeholder="Selecione um arquivo")
+                        if arquivo_selecionado_nome_resumo and st.button("✍️ Gerar Resumo Executivo", key="btn_resumo_tab_v3", use_container_width=True):
+                            arquivo_obj_selecionado = next((arq for arq in arquivos_pdf_originais_global if arq.name == arquivo_selecionado_nome_resumo), None)
+                            if arquivo_obj_selecionado:
+                                arquivo_bytes = arquivo_obj_selecionado.getvalue() # Obter bytes do UploadedFile
+                                resumo = gerar_resumo_executivo(arquivo_bytes, arquivo_obj_selecionado.name)
+                                st.session_state.resumo_gerado = resumo
+                                st.session_state.arquivo_resumido = arquivo_selecionado_nome_resumo
+                                st.rerun()
+                            else: st.error("Arquivo selecionado não encontrado (isso não deveria acontecer).")
+                        
+                        if st.session_state.get("arquivo_resumido") == arquivo_selecionado_nome_resumo and st.session_state.get("resumo_gerado"):
+                            st.subheader(f"Resumo do Contrato: {st.session_state.arquivo_resumido}"); st.markdown(st.session_state.resumo_gerado)
+                    else: st.info("Nenhum arquivo carregado disponível para resumo nesta sessão.")
+                elif nomes_arquivos_global: # Se carregou de coleção
+                     st.info("A função de resumo individual de arquivos é otimizada para uploads novos. Para coleções, use o chat para pedir resumos.")
+                else: st.warning("Carregue documentos para usar a função de resumo.")
+        
 		with tab_riscos:
 			st.header("🚩 Análise de Cláusulas de Risco")
 			st.markdown("Analisa os documentos carregados na sessão atual em busca de cláusulas potencialmente arriscadas.")
@@ -705,7 +705,7 @@ else:
 									st.warning(f"Não foi possível extrair texto para análise de risco de {arquivo_pdf_obj.name} mesmo com Gemini.")
 						except Exception as e_leitura_risco:
 							st.error(f"Erro ao ler {arquivo_pdf_obj.name} para análise de risco: {e_leitura_risco}")
-
+	
 					resultados_analise_riscos_temp = {}
 					if textos_completos_docs_riscos:
 						barra_riscos = st.progress(0, text="Analisando riscos...")
@@ -720,7 +720,7 @@ else:
 					else:
 						st.warning("Nenhum texto pôde ser extraído dos documentos para análise de riscos.")
 					st.rerun()
-
+	
 				if st.session_state.get("analise_riscos_resultados"):
 					st.markdown("---")
 					for nome_arquivo_risco, analise_risco in st.session_state.analise_riscos_resultados.items():
@@ -728,7 +728,7 @@ else:
 			elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
 				st.warning("A Análise de Riscos detalhada funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
 			else: st.info("Faça o upload de documentos para ativar a análise de riscos.")
-
+	
 		with tab_prazos:
 			st.header("🗓️ Monitoramento de Prazos e Vencimentos")
 			st.markdown("Extrai e organiza datas e prazos importantes dos documentos carregados na sessão atual.")
@@ -780,7 +780,7 @@ else:
 						st.warning("Nenhum texto pôde ser extraído dos documentos para análise de prazos.")
 						st.session_state.eventos_contratuais_df = pd.DataFrame()
 					st.rerun()
-
+	
 				if 'eventos_contratuais_df' in st.session_state and st.session_state.eventos_contratuais_df is not None:
 					df_display_eventos = st.session_state.eventos_contratuais_df.copy()
 					if not df_display_eventos.empty:
@@ -789,7 +789,7 @@ else:
 							 df_display_eventos['Data Formatada'] = df_display_eventos['Data Objeto'].dt.strftime('%d/%m/%Y').fillna('N/A')
 						else: # Fallback se Data Objeto não for datetime
 							df_display_eventos['Data Formatada'] = df_display_eventos.get('Data Informada', pd.Series(['N/A'] * len(df_display_eventos)))
-
+	
 						st.subheader("Todos os Eventos e Prazos Identificados")
 						colunas_para_exibir_eventos = ['Arquivo Fonte', 'Evento', 'Data Informada', 'Data Formatada', 'Trecho Relevante']
 						colunas_existentes_eventos = [col for col in colunas_para_exibir_eventos if col in df_display_eventos.columns]
@@ -813,7 +813,7 @@ else:
 			elif "colecao_ativa" in st.session_state and st.session_state.colecao_ativa: 
 				st.warning("O Monitoramento de Prazos funciona melhor com arquivos recém-carregados, pois requer o conteúdo completo.")
 			else: st.info("Faça o upload de documentos para ativar o monitoramento de prazos.")
-
+	
 		with tab_conformidade:
 			st.header("⚖️ Verificador de Conformidade Contratual")
 			st.markdown("Compare um documento com um documento de referência para identificar desalinhamentos.")
@@ -829,7 +829,7 @@ else:
 					 st.warning("Selecione um documento de referência diferente para habilitar a análise, ou carregue mais documentos.")
 				elif not arquivos_pdf_originais_global or len(arquivos_pdf_originais_global) < 2:
 					 st.warning("Carregue pelo menos dois documentos para fazer uma comparação.")
-
+	
 				if opcoes_docs_analisar_conf :
 					with col_ana_conf:
 						docs_a_analisar_nomes_conf = st.multiselect("2. Documento(s) a Analisar:", options=opcoes_docs_analisar_conf, key="multiselect_docs_ana_conf_v3", placeholder="Selecione o(s) doc(s) para análise")
@@ -862,7 +862,7 @@ else:
 											for page_ana in doc_fitz_ana: texto_doc_analisar_conf += page_ana.get_text() + "\n"
 									except Exception as e_read_ana:
 										 st.error(f"Erro ao ler doc a analisar {doc_analisar_obj_conf.name}: {e_read_ana}")
-
+	
 									if texto_doc_analisar_conf.strip():
 										resultado_conformidade_doc = verificar_conformidade_documento(texto_doc_referencia_conf, doc_referencia_nome_conf, texto_doc_analisar_conf, nome_doc_analisar_conf)
 										st.session_state.conformidade_resultados[f"{nome_doc_analisar_conf}_vs_{doc_referencia_nome_conf}"] = resultado_conformidade_doc
@@ -872,7 +872,7 @@ else:
 							barra_conf.empty()
 							st.success("Análise de conformidade concluída.")
 							st.rerun()
-
+	
 				if st.session_state.get("conformidade_resultados"):
 					st.markdown("---")
 					for chave_analise_conf, relatorio_conf in st.session_state.conformidade_resultados.items():
@@ -885,9 +885,9 @@ else:
 			st.header("📊 Detecção de Anomalias Contratuais")
 			st.markdown("Identifica dados que fogem do padrão no conjunto de contratos carregados. "
 						"**Nota:** Esta funcionalidade depende da qualidade e consistência da extração de dados realizada na aba '📈 Dashboard'.")
-
+	
 			df_para_anomalias_tab = st.session_state.get("df_dashboard")
-
+	
 			if df_para_anomalias_tab is None or df_para_anomalias_tab.empty:
 				st.warning("Os dados para análise de anomalias ainda não foram gerados. "
 						   "Por favor, vá para a aba '📈 Dashboard' e clique em "
