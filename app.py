@@ -22,6 +22,7 @@ from ui_tabs import (
 def render_login_page(db):
     """Renderiza a página de login e cadastro."""
     st.title("Bem-vindo ao Analisador-IA ProMax")
+    st.image("https://i.imgur.com/aozL2jD.png", width=120)
     
     login_tab, register_tab = st.tabs(["Login", "Cadastrar"])
 
@@ -121,10 +122,15 @@ def main():
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
     # --- CORREÇÃO APLICADA AQUI ---
-    # Este CSS oculta o cabeçalho padrão e o botão "Manage app" do Streamlit
+    # Este CSS oculta os botões da barra de ferramentas e o botão "Manage app",
+    # mas mantém o resto do cabeçalho, incluindo o botão da barra lateral.
     st.markdown("""
         <style>
-            header {visibility: hidden;}
+            div[data-testid="stToolbar"] {
+                visibility: hidden;
+                height: 0%;
+                position: fixed;
+            }
             div[data-testid="stDeployButton"] {
                 visibility: hidden;
             }
