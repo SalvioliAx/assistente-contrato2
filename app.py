@@ -22,6 +22,7 @@ from ui_tabs import (
 def render_login_page(db):
     """Renderiza a página de login e cadastro."""
     st.title("Bem-vindo ao Analisador-IA ProMax")
+    st.image("https://i.imgur.com/aozL2jD.png", width=120)
     
     login_tab, register_tab = st.tabs(["Login", "Cadastrar"])
 
@@ -120,19 +121,7 @@ def main():
     """Função principal que gerencia o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
-    # --- CORREÇÃO APLICADA AQUI ---
-    # Este CSS utiliza 'display: none !important;' para garantir que os elementos
-    # sejam ocultados de forma robusta, sem afetar o botão da barra lateral.
-    st.markdown("""
-        <style>
-            div[data-testid="stToolbar"] {
-                display: none !important;
-            }
-            div[data-testid="stDeployButton"] {
-                display: none !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
+    # Bloco de CSS removido
     
     db, BUCKET_NAME = initialize_services()
     if not db:
