@@ -31,7 +31,7 @@ from ui_tabs import (
 
 def main():
     """Função principal que executa a aplicação Streamlit."""
-    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="�")
+    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     hide_streamlit_style = "<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;}</style>"
     st.markdown(hide_streamlit_style, unsafe_allow_html=True)
     st.title("💡 Analisador-IA ProMax")
@@ -46,7 +46,7 @@ def main():
             st.sidebar.error(f"Erro ao inicializar embeddings: {e}")
 
     # Inicializa o estado da sessão se não existir
-    if "messages" not in st.session_state:
+    if "vector_store" not in st.session_state:
         st.session_state.messages = []
         st.session_state.vector_store = None
         st.session_state.arquivos_pdf_originais = None
@@ -69,13 +69,11 @@ def main():
             if st.button("Processar Documentos", use_container_width=True, disabled=not arquivos):
                 vs, nomes = obter_vector_store_de_uploads(arquivos, embeddings)
                 if vs and nomes:
-                    # --- CORREÇÃO: Removido st.session_state.clear() ---
-                    # Apenas atualizamos as chaves necessárias
                     st.session_state.messages = []
                     st.session_state.vector_store = vs
                     st.session_state.nomes_arquivos = nomes
                     st.session_state.arquivos_pdf_originais = arquivos
-                    st.session_state.colecao_ativa = None # Garante que estamos no modo de upload
+                    st.session_state.colecao_ativa = None
                     st.success(f"{len(nomes)} documento(s) processado(s)!")
                     st.rerun()
 
@@ -86,13 +84,11 @@ def main():
                 if st.button("Carregar Coleção", use_container_width=True, disabled=not sel):
                     vs, nomes = carregar_colecao(db, embeddings, sel)
                     if vs and nomes:
-                        # --- CORREÇÃO: Removido st.session_state.clear() ---
-                        # Apenas atualizamos as chaves necessárias
                         st.session_state.messages = []
                         st.session_state.vector_store = vs
                         st.session_state.nomes_arquivos = nomes
                         st.session_state.colecao_ativa = sel
-                        st.session_state.arquivos_pdf_originais = None # Garante que não há arquivos de upload
+                        st.session_state.arquivos_pdf_originais = None
                         st.rerun()
             else:
                 st.info("Nenhuma coleção salva no Firebase.")
@@ -117,18 +113,23 @@ def main():
             "💬 Chat", "📈 Dashboard", "📜 Resumo", "🚩 Riscos", "🗓️ Prazos", "⚖️ Conformidade", "📊 Anomalias"
         ])
         
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Garantindo que os argumentos corretos sejam passados para todas as abas
+        vector_store = st.session_state.vector_store
+        nomes_arquivos = st.session_state.nomes_arquivos
+        
         with tab_chat:
-            render_chat_tab(st.session_state.vector_store, st.session_state.nomes_arquivos)
+            render_chat_tab(vector_store, nomes_arquivos)
         with tab_dash:
-            render_dashboard_tab(st.session_state.vector_store, st.session_state.nomes_arquivos)
+            render_dashboard_tab(vector_store, nomes_arquivos)
         with tab_res:
-            render_resumo_tab(st.session_state.get("arquivos_pdf_originais"), st.session_state.get("nomes_arquivos"))
+            render_resumo_tab(vector_store, nomes_arquivos)
         with tab_risk:
-            render_riscos_tab(st.session_state.get("arquivos_pdf_originais"))
+            render_riscos_tab(vector_store, nomes_arquivos)
         with tab_prazo:
-            render_prazos_tab(st.session_state.get("arquivos_pdf_originais"))
+            render_prazos_tab(vector_store, nomes_arquivos)
         with tab_conf:
-            render_conformidade_tab(st.session_state.get("arquivos_pdf_originais"))
+            render_conformidade_tab(vector_store, nomes_arquivos)
         with tab_anom:
             render_anomalias_tab()
 
