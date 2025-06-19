@@ -121,6 +121,14 @@ def main():
     """Função principal que gerencia o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
+    # --- CORREÇÃO APLICADA AQUI ---
+    # Este CSS oculta o cabeçalho padrão do Streamlit
+    st.markdown("""
+        <style>
+            header {visibility: hidden;}
+        </style>
+    """, unsafe_allow_html=True)
+    
     db, BUCKET_NAME = initialize_services()
     if not db:
         st.error("Falha na conexão com o banco de dados.")
