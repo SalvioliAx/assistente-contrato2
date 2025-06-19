@@ -121,18 +121,6 @@ def main():
     """Função principal que gerencia o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
-    # Este CSS oculta a barra de ferramentas e o botão de deploy
-    st.markdown("""
-        <style>
-            div[data-testid="stToolbar"] {
-                display: none !important;
-            }
-            div[data-testid="manage-app-button"] {
-                display: none !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-    
     db, BUCKET_NAME = initialize_services()
     if not db:
         st.error("Falha na conexão com o banco de dados.")
