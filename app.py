@@ -128,7 +128,9 @@ def main():
             div[data-testid="stToolbar"] {
                 display: none !important;
             }
-            
+            div[data-testid="stDeployButton"] {
+                display: none !important;
+            }
         </style>
     """, unsafe_allow_html=True)
     
