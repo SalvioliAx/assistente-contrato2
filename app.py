@@ -122,11 +122,16 @@ def main():
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
     # --- CORREÇÃO APLICADA AQUI ---
-    # Este CSS oculta especificamente o botão "Manage app" usando o seu data-testid
+    # Este CSS oculta a barra de ferramentas superior e o botão de deploy/manage app
     st.markdown("""
         <style>
-            button[data-testid="manage-app-button"] {
-                display: none;
+            /* Oculta a barra de ferramentas superior (Share, etc.) */
+            div[data-testid="stToolbar"] {
+                display: none !important;
+            }
+            /* Oculta o botão de deploy/manage app */
+            div[data-testid="stDeployButton"] {
+                display: none !important;
             }
         </style>
     """, unsafe_allow_html=True)
