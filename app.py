@@ -25,7 +25,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from pydantic import BaseModel, Field
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
+from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA, LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.output_parsers import PydanticOutputParser, OutputFixingParser
