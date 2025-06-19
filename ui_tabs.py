@@ -32,10 +32,10 @@ def render_chat_tab(vector_store, nomes_arquivos):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
-    if prompt := st.chat_input("Faça sua pergunta sobre os contratos..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    if user_prompt := st.chat_input("Faça sua pergunta sobre os contratos..."):
+        st.session_state.messages.append({"role": "user", "content": user_prompt})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(user_prompt)
         
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
@@ -48,7 +48,11 @@ def render_chat_tab(vector_store, nomes_arquivos):
                     return_source_documents=True
                 )
                 try:
-                    resultado = qa_chain.invoke({"query": prompt})
+                    # --- CORREÇÃO APLICADA AQUI ---
+                    # Adiciona a instrução para responder em português ao prompt do usuário.
+                    prompt_em_portugues = f"{user_prompt}\n\n**Instrução:** Responda em português do Brasil."
+                    resultado = qa_chain.invoke({"query": prompt_em_portugues})
+                    
                     resposta = resultado["result"]
                     fontes = resultado.get("source_documents")
                     
