@@ -124,24 +124,36 @@ def salvar_colecao_atual(nome_colecao, vector_store_atual, nomes_arquivos_atuais
     with st.spinner(f"A salvar coleção '{nome_colecao}' no Firebase..."):
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
+                # O vector store é salvo em uma subpasta 'faiss_index'
                 faiss_path = os.path.join(temp_dir, "faiss_index")
                 vector_store_atual.save_local(faiss_path)
 
+                # O manifesto é salvo na raiz do temp_dir
                 manifest_path = os.path.join(temp_dir, "manifest.json")
                 with open(manifest_path, "w") as f:
                     json.dump(nomes_arquivos_atuais, f)
                 
+                # Cria o arquivo zip
                 zip_path_temp = os.path.join(tempfile.gettempdir(), f"{nome_colecao}.zip")
                 with zipfile.ZipFile(zip_path_temp, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    # Itera sobre todos os arquivos e pastas no diretório temporário
                     for root, _, files in os.walk(temp_dir):
                         for file in files:
-                            zipf.write(os.path.join(root, file), arcname=file)
+                            # --- CORREÇÃO APLICADA AQUI ---
+                            # Obtenha o caminho completo do arquivo
+                            caminho_completo = os.path.join(root, file)
+                            # Crie o caminho relativo para preservar a estrutura de pastas no zip
+                            caminho_relativo = os.path.relpath(caminho_completo, temp_dir)
+                            # Escreva no zip usando o caminho relativo como nome do arquivo
+                            zipf.write(caminho_completo, arcname=caminho_relativo)
 
+                # Faz o upload para o Firebase Storage
                 bucket = storage.bucket(BUCKET_NAME)
                 blob_path = f"collections/{nome_colecao}.zip"
                 blob = bucket.blob(blob_path)
                 blob.upload_from_filename(zip_path_temp)
 
+                # Salva os metadados no Firestore
                 doc_ref = db.collection('ia_collections').document(nome_colecao)
                 doc_ref.set({
                     'nomes_arquivos': nomes_arquivos_atuais,
@@ -153,52 +165,6 @@ def salvar_colecao_atual(nome_colecao, vector_store_atual, nomes_arquivos_atuais
                 st.success(f"Coleção '{nome_colecao}' salva com sucesso no Firebase!"); return True
             except Exception as e:
                 st.error(f"Erro ao salvar coleção no Firebase: {e}"); return False
-
-@st.cache_resource(show_spinner="A carregar coleção do Firebase...")
-def carregar_colecao(nome_colecao, _embeddings_obj):
-    if not db or not BUCKET_NAME:
-        st.error("Conexão com Firebase não está disponível.")
-        return None, None
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        try:
-            doc_ref = db.collection('ia_collections').document(nome_colecao)
-            doc = doc_ref.get()
-            if not doc.exists:
-                st.error(f"Coleção '{nome_colecao}' não encontrada no Firebase.")
-                return None, None
-            
-            metadata = doc.to_dict()
-            storage_path = metadata.get('storage_path')
-            nomes_arquivos = metadata.get('nomes_arquivos')
-
-            if not storage_path or not nomes_arquivos:
-                st.error(f"Metadados incompletos para a coleção '{nome_colecao}'.")
-                return None, None
-
-            bucket = storage.bucket(BUCKET_NAME)
-            blob = bucket.blob(storage_path)
-            
-            zip_path_temp = os.path.join(temp_dir, "downloaded_collection.zip")
-            blob.download_to_filename(zip_path_temp)
-
-            extract_path = os.path.join(temp_dir, "extracted_index")
-            os.makedirs(extract_path, exist_ok=True)
-            with zipfile.ZipFile(zip_path_temp, 'r') as zip_ref:
-                zip_ref.extractall(extract_path)
-
-            faiss_index_path = os.path.join(extract_path, "faiss_index")
-            vector_store = FAISS.load_local(
-                faiss_index_path, 
-                embeddings=_embeddings_obj, 
-                allow_dangerous_deserialization=True
-            )
-
-            st.success(f"Coleção '{nome_colecao}' carregada do Firebase!"); return vector_store, nomes_arquivos
-        
-        except Exception as e:
-            st.error(f"Erro ao carregar coleção '{nome_colecao}' do Firebase: {e}")
-            return None, None
 
 
 # --- FUNÇÕES DE PROCESSAMENTO DE DOCUMENTOS ---
