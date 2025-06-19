@@ -51,14 +51,31 @@ def load_visual_assets():
                 display: flex;
                 flex-direction: row;
                 gap: 10px;
+                border-bottom: 2px solid #E5E7EB; /* Adiciona uma linha de base */
+                padding-bottom: 10px;
             }
+            /* Esconde o radio button real */
+            div[role="radiogroup"] label > div:first-child {
+                display: none;
+            }
+            /* Estiliza o label para parecer um botão/aba */
+             div[role="radiogroup"] label {
+                cursor: pointer;
+                padding: 8px 16px;
+                border-radius: 8px;
+                transition: all 0.2s;
+             }
+             /* Estilo para a aba não selecionada ao passar o rato */
+             div[role="radiogroup"] label:hover {
+                background-color: #F3F4F6;
+             }
         </style>
     """, unsafe_allow_html=True)
 
 def render_login_page(db):
     """Renderiza a página de login com um layout aprimorado usando Tailwind CSS."""
     st.markdown("""
-        <div class="fixed top-0 left-0 w-full h-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center p-4">
+        <div class="fixed top-0 left-0 w-full h-full bg-gradient-to-br from-gray-50 to-gray-200 flex items-center justify-center p-4">
             <div class="bg-white w-full max-w-md p-8 rounded-2xl shadow-lg">
                 <div class="flex flex-col items-center">
                     <img src="https://i.imgur.com/aozL2jD.png" alt="Logo" class="w-20 h-20 mb-4"/>
@@ -99,7 +116,6 @@ def render_login_page(db):
 
 def render_main_app(db, BUCKET_NAME, embeddings):
     """Renderiza a aplicação principal após o login com o novo design."""
-    # Layout da página principal
     st.markdown('<div class="bg-gray-100 min-h-screen">', unsafe_allow_html=True)
     
     with st.sidebar:
@@ -147,7 +163,8 @@ def render_main_app(db, BUCKET_NAME, embeddings):
                 del st.session_state[key]
             st.rerun()
 
-    # Header da aplicação
+    # --- CORREÇÃO APLICADA AQUI ---
+    # As tags <div> agora estão corretamente fechadas.
     st.markdown("""
         <div class="p-4 sm:p-6 lg:p-8">
             <div class="flex justify-between items-center">
@@ -156,46 +173,42 @@ def render_main_app(db, BUCKET_NAME, embeddings):
                     <h1 class="text-3xl font-bold text-gray-800">Analisador-IA ProMax</h1>
                 </div>
             </div>
+        </div>
     """, unsafe_allow_html=True)
     
+    # Este container envolve a navegação e o conteúdo da aba
+    st.markdown('<div class="px-4 sm:px-6 lg:px-8">', unsafe_allow_html=True)
+
     if not st.session_state.get("vector_store"):
         st.info("👈 Por favor, carregue documentos ou uma coleção para começar.")
     else:
-        # Navegação de abas personalizada
         tab_options = ["💬 Chat", "📈 Dashboard", "📜 Resumo", "🚩 Riscos", "🗓️ Prazos", "⚖️ Conformidade", "📊 Anomalias"]
         
-        # Guardar a aba selecionada no estado da sessão
         if 'active_tab' not in st.session_state:
             st.session_state.active_tab = tab_options[0]
 
-        # Componente de rádio estilizado para parecerem abas
         selected_tab = st.radio("Navegação", tab_options, key="tab_navigation", horizontal=True, label_visibility="collapsed")
         st.session_state.active_tab = selected_tab
         
-        # Contentor principal
         st.markdown('<div class="bg-white p-6 rounded-2xl shadow-sm mt-4">', unsafe_allow_html=True)
 
         vector_store = st.session_state.vector_store
         nomes_arquivos = st.session_state.nomes_arquivos
         
-        # Dicionário para chamar a função de renderização correta
         tab_functions = {
-            "💬 Chat": render_chat_tab,
-            "📈 Dashboard": render_dashboard_tab,
-            "📜 Resumo": render_resumo_tab,
-            "🚩 Riscos": render_riscos_tab,
-            "🗓️ Prazos": render_prazos_tab,
-            "⚖️ Conformidade": render_conformidade_tab,
+            "💬 Chat": render_chat_tab, "📈 Dashboard": render_dashboard_tab,
+            "📜 Resumo": render_resumo_tab, "🚩 Riscos": render_riscos_tab,
+            "🗓️ Prazos": render_prazos_tab, "⚖️ Conformidade": render_conformidade_tab,
             "📊 Anomalias": render_anomalias_tab
         }
 
-        # Renderizar a aba ativa
         tab_functions[st.session_state.active_tab](vector_store, nomes_arquivos)
 
-        st.markdown('</div>') # Fecha o contentor principal
+        st.markdown('</div>')
 
+    st.markdown('</div>') # Fecha o container da navegação
     st.markdown('</div>') # Fecha o layout da página
-
+    
 
 def main():
     """Função principal que gere o fluxo da aplicação."""
