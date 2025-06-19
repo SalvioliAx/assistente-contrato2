@@ -8,3 +8,5 @@ pydantic
 numpy
 Pillow
 PyMuPDF
+firebase-admin
+faiss-cpu
