@@ -122,13 +122,17 @@ def main():
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
     # --- CORREÇÃO APLICADA AQUI ---
-    # Este CSS oculta a barra de ferramentas superior e o botão de deploy/manage app
+    # Este CSS oculta o rodapé e o avatar do criador da app.
     st.markdown("""
         <style>
-           
-            /* Oculta o botão de deploy/manage app */
+            footer {
+                visibility: hidden;
+            }
+            [data-testid="appCreatorAvatar"] {
+                display: none;
+            }
             div[data-testid="stDeployButton"] {
-                display: none !important;
+                display: none;
             }
         </style>
     """, unsafe_allow_html=True)
