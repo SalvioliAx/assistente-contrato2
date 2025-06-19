@@ -1,12 +1,11 @@
 streamlit
 pandas
+numpy
+firebase-admin
 langchain
 langchain-community
 langchain-google-genai
-google-generativeai
 pydantic
-numpy
-Pillow
 PyMuPDF
-firebase-admin
+Pillow
 faiss-cpu
