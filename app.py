@@ -31,13 +31,11 @@ from ui_tabs import (
 
 def main():
     """Função principal que executa a aplicação Streamlit."""
-    # --- CONFIGURAÇÃO DA PÁGINA E ESTILO ---
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     hide_streamlit_style = "<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;}</style>"
     st.markdown(hide_streamlit_style, unsafe_allow_html=True)
     st.title("💡 Analisador-IA ProMax")
 
-    # --- INICIALIZAÇÃO DE SERVIÇOS E ESTADO ---
     db, BUCKET_NAME = initialize_services()
 
     embeddings = None
@@ -47,15 +45,14 @@ def main():
         except Exception as e:
             st.sidebar.error(f"Erro ao inicializar embeddings: {e}")
 
-    # Inicializa o estado da sessão se não existir
+    # Inicializa o estado da sessão
     if "messages" not in st.session_state:
-        st.session_state.clear() # Limpa tudo para um início limpo
+        st.session_state.clear()
         st.session_state.messages = []
         st.session_state.vector_store = None
         st.session_state.arquivos_pdf_originais = None
         st.session_state.colecao_ativa = None
 
-    # --- BARRA LATERAL (SIDEBAR) ---
     with st.sidebar:
         st.image("https://i.imgur.com/aozL2jD.png", width=100)
         st.header("Gerenciar Documentos")
@@ -64,10 +61,10 @@ def main():
             st.error("Aplicação desabilitada. Verifique as conexões.")
             return
 
-        modo = st.radio("Carregar documentos:", ("Novo Upload", "Carregar Coleção"))
+        modo = st.radio("Carregar documentos:", ("Novo Upload", "Carregar Coleção"), key="modo_carregamento")
 
         if modo == "Novo Upload":
-            arquivos = st.file_uploader("Selecione PDFs", type="pdf", accept_multiple_files=True)
+            arquivos = st.file_uploader("Selecione PDFs", type="pdf", accept_multiple_files=True, key="upload_arquivos")
             if st.button("Processar Documentos", use_container_width=True, disabled=not arquivos):
                 vs, nomes = obter_vector_store_de_uploads(arquivos, embeddings)
                 if vs and nomes:
@@ -82,8 +79,9 @@ def main():
         else: # Carregar Coleção
             colecoes = listar_colecoes_salvas(db)
             if colecoes:
-                sel = st.selectbox("Escolha uma coleção:", colecoes, index=None, placeholder="Selecione...")
+                sel = st.selectbox("Escolha uma coleção:", colecoes, index=None, placeholder="Selecione...", key="select_colecao")
                 if st.button("Carregar Coleção", use_container_width=True, disabled=not sel):
+                    # A chamada aqui permanece a mesma, a mudança foi na definição da função
                     vs, nomes = carregar_colecao(db, embeddings, sel)
                     if vs and nomes:
                         st.session_state.clear()
@@ -98,7 +96,7 @@ def main():
         if st.session_state.get("vector_store") and st.session_state.get("arquivos_pdf_originais"):
             st.markdown("---")
             st.subheader("Salvar Coleção")
-            nome_colecao = st.text_input("Nome para a nova coleção:")
+            nome_colecao = st.text_input("Nome para a nova coleção:", key="nome_nova_colecao")
             if st.button("Salvar", use_container_width=True, disabled=not nome_colecao):
                 salvar_colecao_atual(db, BUCKET_NAME, nome_colecao, st.session_state.vector_store, st.session_state.nomes_arquivos)
         
@@ -108,7 +106,6 @@ def main():
         elif st.session_state.get("nomes_arquivos"):
             st.markdown(f"**📄 Arquivos em Memória:** {len(st.session_state.nomes_arquivos)}")
 
-    # --- LAYOUT PRINCIPAL COM ABAS ---
     if not st.session_state.get("vector_store"):
         st.info("👈 Por favor, carregue e processe documentos na barra lateral para começar.")
     else:
@@ -121,13 +118,13 @@ def main():
         with tab_dash:
             render_dashboard_tab(st.session_state.vector_store, st.session_state.nomes_arquivos)
         with tab_res:
-            render_resumo_tab(st.session_state.arquivos_pdf_originais, st.session_state.nomes_arquivos)
+            render_resumo_tab(st.session_state.get("arquivos_pdf_originais"), st.session_state.get("nomes_arquivos"))
         with tab_risk:
-            render_riscos_tab(st.session_state.arquivos_pdf_originais)
+            render_riscos_tab(st.session_state.get("arquivos_pdf_originais"))
         with tab_prazo:
-            render_prazos_tab(st.session_state.arquivos_pdf_originais)
+            render_prazos_tab(st.session_state.get("arquivos_pdf_originais"))
         with tab_conf:
-            render_conformidade_tab(st.session_state.arquivos_pdf_originais)
+            render_conformidade_tab(st.session_state.get("arquivos_pdf_originais"))
         with tab_anom:
             render_anomalias_tab()
 
