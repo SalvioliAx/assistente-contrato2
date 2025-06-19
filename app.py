@@ -26,18 +26,8 @@ def load_visual_assets():
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-            
-            /* Aplicar a fonte a toda a aplicação */
-            html, body, [class*="st-"] {
-                font-family: 'Inter', sans-serif;
-            }
-
-            /* Esconder elementos padrão do Streamlit */
-            #MainMenu, footer, header {
-                visibility: hidden;
-            }
-
-            /* Estilo para os botões do Streamlit que não são afetados pelo Tailwind */
+            html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
+            #MainMenu, footer, header { visibility: hidden; }
             .stButton>button {
                 transition: all 0.2s ease-in-out;
             }
@@ -45,30 +35,21 @@ def load_visual_assets():
                 transform: translateY(-2px);
                 box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             }
-            
-            /* Customização para o radio button que funciona como abas */
             div[role="radiogroup"] {
                 display: flex;
                 flex-direction: row;
                 gap: 10px;
-                border-bottom: 2px solid #E5E7EB; /* Adiciona uma linha de base */
+                border-bottom: 2px solid #E5E7EB;
                 padding-bottom: 10px;
             }
-            /* Esconde o radio button real */
-            div[role="radiogroup"] label > div:first-child {
-                display: none;
-            }
-            /* Estiliza o label para parecer um botão/aba */
-             div[role="radiogroup"] label {
+            div[role="radiogroup"] label > div:first-child { display: none; }
+            div[role="radiogroup"] label {
                 cursor: pointer;
                 padding: 8px 16px;
                 border-radius: 8px;
                 transition: all 0.2s;
-             }
-             /* Estilo para a aba não selecionada ao passar o rato */
-             div[role="radiogroup"] label:hover {
-                background-color: #F3F4F6;
-             }
+            }
+            div[role="radiogroup"] label:hover { background-color: #F3F4F6; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -112,7 +93,6 @@ def render_login_page(db):
                     st.error("As senhas não coincidem.")
     
     st.markdown("</div></div>", unsafe_allow_html=True)
-
 
 def render_main_app(db, BUCKET_NAME, embeddings):
     """Renderiza a aplicação principal após o login com o novo design."""
@@ -163,8 +143,6 @@ def render_main_app(db, BUCKET_NAME, embeddings):
                 del st.session_state[key]
             st.rerun()
 
-    # --- CORREÇÃO APLICADA AQUI ---
-    # As tags <div> agora estão corretamente fechadas.
     st.markdown("""
         <div class="p-4 sm:p-6 lg:p-8">
             <div class="flex justify-between items-center">
@@ -176,7 +154,6 @@ def render_main_app(db, BUCKET_NAME, embeddings):
         </div>
     """, unsafe_allow_html=True)
     
-    # Este container envolve a navegação e o conteúdo da aba
     st.markdown('<div class="px-4 sm:px-6 lg:px-8">', unsafe_allow_html=True)
 
     if not st.session_state.get("vector_store"):
@@ -195,6 +172,7 @@ def render_main_app(db, BUCKET_NAME, embeddings):
         vector_store = st.session_state.vector_store
         nomes_arquivos = st.session_state.nomes_arquivos
         
+        # Dicionário de funções para renderizar cada aba
         tab_functions = {
             "💬 Chat": render_chat_tab, "📈 Dashboard": render_dashboard_tab,
             "📜 Resumo": render_resumo_tab, "🚩 Riscos": render_riscos_tab,
@@ -202,14 +180,19 @@ def render_main_app(db, BUCKET_NAME, embeddings):
             "📊 Anomalias": render_anomalias_tab
         }
 
-        tab_functions[st.session_state.active_tab](vector_store, nomes_arquivos)
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Chamamos a função da aba ativa, passando os argumentos corretos para cada uma.
+        active_function = tab_functions[st.session_state.active_tab]
+        if st.session_state.active_tab == "📊 Anomalias":
+            active_function() # Esta função não precisa de argumentos
+        else:
+            active_function(vector_store, nomes_arquivos)
 
         st.markdown('</div>')
 
-    st.markdown('</div>') # Fecha o container da navegação
-    st.markdown('</div>') # Fecha o layout da página
+    st.markdown('</div>')
+    st.markdown('</div>')
     
-
 def main():
     """Função principal que gere o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
