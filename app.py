@@ -134,10 +134,13 @@ def salvar_colecao_atual(nome_colecao, vector_store_atual, nomes_arquivos_atuais
                     json.dump(nomes_arquivos_atuais, f)
                 
                 zip_path_temp = os.path.join(tempfile.gettempdir(), f"{nome_colecao}.zip")
+                # CORREÇÃO: Garante que a estrutura de pastas seja preservada no ZIP.
                 with zipfile.ZipFile(zip_path_temp, 'w', zipfile.ZIP_DEFLATED) as zipf:
                     for root, _, files in os.walk(temp_dir):
                         for file in files:
-                            zipf.write(os.path.join(root, file), arcname=file)
+                            file_path = os.path.join(root, file)
+                            arcname = os.path.relpath(file_path, temp_dir)
+                            zipf.write(file_path, arcname)
 
                 bucket = storage.bucket(BUCKET_NAME)
                 blob_path = f"collections/{nome_colecao}.zip"
