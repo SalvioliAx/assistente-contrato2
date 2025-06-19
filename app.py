@@ -36,10 +36,7 @@ from langchain_core.documents import Document
 # Garanta que seu arquivo .streamlit/secrets.toml está configurado corretamente.
 @st.cache_resource
 def initialize_firebase():
-"""
-   Initializes the Firebase Admin SDK using Streamlit secrets.
-   Returns the Firestore database client and storage bucket name.
-   """
+
 try:
 # Tenta obter as credenciais do Streamlit Secrets
 creds_secrets_obj = st.secrets["firebase_credentials"]
