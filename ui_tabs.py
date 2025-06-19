@@ -20,6 +20,31 @@ from llm_utils import (
 from langchain.chains import RetrievalQA
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+# --- NOVA FUNÇÃO AUXILIAR ---
+def _get_full_text_from_vector_store(vector_store, nome_arquivo):
+    """
+    Reconstrói o texto completo de um arquivo a partir dos documentos no vector store.
+    """
+    # O vector store do FAISS armazena os documentos e seus índices.
+    # Acessamos a lista de documentos diretamente através do docstore.
+    if not hasattr(vector_store, 'docstore') or not hasattr(vector_store.docstore, '_dict'):
+        st.error("Vector store com formato incompatível ou vazio para reconstrução de texto.")
+        return ""
+        
+    docs_arquivo = []
+    # O _dict contém todos os documentos, a chave é o id interno.
+    for doc_id, doc in vector_store.docstore._dict.items():
+        if doc.metadata.get('source') == nome_arquivo:
+            docs_arquivo.append(doc)
+    
+    if not docs_arquivo:
+        return ""
+        
+    # Ordena os documentos pela página para garantir a ordem correta do texto
+    docs_arquivo.sort(key=lambda x: x.metadata.get('page', 0))
+    
+    return "\n".join([doc.page_content for doc in docs_arquivo])
+
 def render_chat_tab(vector_store, nomes_arquivos):
     """Renderiza a aba de Chat Interativo."""
     st.header("💬 Converse com seus documentos")
@@ -48,8 +73,6 @@ def render_chat_tab(vector_store, nomes_arquivos):
                     return_source_documents=True
                 )
                 try:
-                    # --- CORREÇÃO APLICADA AQUI ---
-                    # Adiciona a instrução para responder em português ao prompt do usuário.
                     prompt_em_portugues = f"{user_prompt}\n\n**Instrução:** Responda em português do Brasil."
                     resultado = qa_chain.invoke({"query": prompt_em_portugues})
                     
@@ -69,24 +92,22 @@ def render_chat_tab(vector_store, nomes_arquivos):
                     st.session_state.messages.append({"role": "assistant", "content": "Desculpe, ocorreu um erro."})
 
 def render_dashboard_tab(vector_store, nomes_arquivos):
-    """Renderiza a aba do Dashboard com dados comparativos."""
     st.header("📈 Análise Comparativa de Dados Contratuais")
     st.markdown("Clique no botão para extrair e comparar os dados chave dos documentos carregados.")
     if st.button("🚀 Gerar Dados para Dashboard", key="btn_dashboard", use_container_width=True):
         dados_extraidos = extrair_dados_dos_contratos(vector_store, nomes_arquivos)
-        if dados_extraidos: 
+        if dados_extraidos:
             st.session_state.df_dashboard = pd.DataFrame(dados_extraidos)
             st.success(f"Dados extraídos para {len(st.session_state.df_dashboard)} contratos.")
-        else: 
+        else:
             st.session_state.df_dashboard = pd.DataFrame()
             st.warning("Nenhum dado foi extraído para o dashboard.")
         st.rerun()
-
     if 'df_dashboard' in st.session_state and not st.session_state.df_dashboard.empty:
         st.dataframe(st.session_state.df_dashboard, use_container_width=True)
 
-def _get_full_text(uploaded_file):
-    """Função auxiliar para ler o texto completo de um PDF."""
+def _get_full_text_from_upload(uploaded_file):
+    """Função auxiliar para ler o texto completo de um PDF de upload."""
     try:
         uploaded_file.seek(0)
         pdf_bytes = uploaded_file.read()
@@ -99,76 +120,90 @@ def _get_full_text(uploaded_file):
         st.error(f"Erro ao ler o arquivo {uploaded_file.name}: {e}")
         return ""
 
-def render_resumo_tab(arquivos_originais, nomes_arquivos):
-    """Renderiza a aba de Resumo Executivo."""
+def render_resumo_tab(vector_store, nomes_arquivos):
     st.header("📜 Resumo Executivo de um Contrato")
-    if not arquivos_originais:
-        st.info("A função de resumo é otimizada para novos uploads. Para coleções salvas, use o chat para pedir resumos.")
-        return
 
-    arquivo_selecionado = st.selectbox("Escolha um contrato para resumir:", options=nomes_arquivos, key="select_resumo", index=None)
+    arquivo_selecionado = st.selectbox(
+        "Escolha um contrato para resumir:", 
+        options=nomes_arquivos, 
+        key="select_resumo", 
+        index=None
+    )
     
     if st.button("✍️ Gerar Resumo Executivo", key="btn_resumo", use_container_width=True, disabled=not arquivo_selecionado):
-        arquivo_obj = next((arq for arq in arquivos_originais if arq.name == arquivo_selecionado), None)
-        if arquivo_obj:
-            texto_completo = _get_full_text(arquivo_obj)
-            if texto_completo:
-                resumo = gerar_resumo_executivo(texto_completo, arquivo_obj.name)
-                st.session_state.resumo_gerado = resumo
-                st.session_state.arquivo_resumido = arquivo_selecionado
-    
-    if 'arquivo_resumido' in st.session_state and st.session_state.arquivo_resumido:
+        with st.spinner(f"Preparando texto de '{arquivo_selecionado}' para resumo..."):
+            texto_completo = _get_full_text_from_vector_store(vector_store, arquivo_selecionado)
+        
+        if texto_completo:
+            resumo = gerar_resumo_executivo(texto_completo, arquivo_selecionado)
+            st.session_state.resumo_gerado = resumo
+            st.session_state.arquivo_resumido = arquivo_selecionado
+        else:
+            st.error(f"Não foi possível reconstruir o texto do contrato '{arquivo_selecionado}' a partir da coleção.")
+
+    if 'arquivo_resumido' in st.session_state and st.session_state.arquivo_resumido == arquivo_selecionado:
         st.subheader(f"Resumo do Contrato: {st.session_state.arquivo_resumido}")
         st.markdown(st.session_state.resumo_gerado)
 
-
-def render_riscos_tab(arquivos_originais):
-    """Renderiza a aba de Análise de Riscos."""
+def render_riscos_tab(vector_store, nomes_arquivos):
     st.header("🚩 Análise de Cláusulas de Risco")
-    if not arquivos_originais:
-        st.info("A análise de riscos é otimizada para novos uploads.")
-        return
-        
-    if st.button("🔎 Analisar Riscos em Todos os Documentos", key="btn_riscos", use_container_width=True):
-        resultados = {}
-        for arquivo in arquivos_originais:
-            texto_completo = _get_full_text(arquivo)
-            if texto_completo:
-                resultados[arquivo.name] = analisar_documento_para_riscos(texto_completo, arquivo.name)
-        st.session_state.analise_riscos_resultados = resultados
     
-    if 'analise_riscos_resultados' in st.session_state and st.session_state.analise_riscos_resultados:
-        for nome_arquivo, analise in st.session_state.analise_riscos_resultados.items():
-            with st.expander(f"Riscos Identificados em: {nome_arquivo}", expanded=True):
-                st.markdown(analise)
+    arquivo_selecionado = st.selectbox(
+        "Escolha um contrato para analisar os riscos:", 
+        options=nomes_arquivos, 
+        key="select_riscos", 
+        index=None
+    )
+    
+    if st.button("🔎 Analisar Riscos", key="btn_riscos", use_container_width=True, disabled=not arquivo_selecionado):
+        with st.spinner(f"Preparando texto de '{arquivo_selecionado}' para análise de riscos..."):
+            texto_completo = _get_full_text_from_vector_store(vector_store, arquivo_selecionado)
 
-def render_prazos_tab(arquivos_originais):
-    """Renderiza a aba de Monitoramento de Prazos."""
+        if texto_completo:
+            analise = analisar_documento_para_riscos(texto_completo, arquivo_selecionado)
+            st.session_state.analise_riscos_resultado = {
+                "nome_arquivo": arquivo_selecionado,
+                "analise": analise
+            }
+        else:
+            st.error(f"Não foi possível reconstruir o texto para análise de riscos do contrato '{arquivo_selecionado}'.")
+
+    if 'analise_riscos_resultado' in st.session_state and st.session_state.analise_riscos_resultado['nome_arquivo'] == arquivo_selecionado:
+        resultado = st.session_state.analise_riscos_resultado
+        with st.expander(f"Riscos Identificados em: {resultado['nome_arquivo']}", expanded=True):
+            st.markdown(resultado['analise'])
+
+def render_prazos_tab(vector_store, nomes_arquivos):
     st.header("🗓️ Monitoramento de Prazos e Vencimentos")
-    if not arquivos_originais:
-        st.info("A extração de prazos é otimizada para novos uploads.")
-        return
-
-    if st.button("🔍 Analisar Prazos e Datas Importantes", key="btn_prazos", use_container_width=True):
-        textos_docs = [{"nome": arq.name, "texto": _get_full_text(arq)} for arq in arquivos_originais]
-        eventos_extraidos = extrair_eventos_dos_contratos(textos_docs)
-        if eventos_extraidos:
-            df = pd.DataFrame(eventos_extraidos)
-            # Tentar converter datas - isso pode precisar de uma função de parsing mais robusta
-            # df['Data Objeto'] = pd.to_datetime(df['Data Informada'], errors='coerce')
-            st.session_state.eventos_contratuais_df = df
+    st.info("Esta funcionalidade analisa todos os contratos da coleção de uma vez.")
     
+    if st.button("🔍 Analisar Prazos e Datas em Todos os Contratos", key="btn_prazos", use_container_width=True):
+        textos_docs = []
+        for nome_arquivo in nomes_arquivos:
+            with st.spinner(f"Reconstruindo texto de '{nome_arquivo}'..."):
+                texto = _get_full_text_from_vector_store(vector_store, nome_arquivo)
+                if texto:
+                    textos_docs.append({"nome": nome_arquivo, "texto": texto})
+        
+        if textos_docs:
+            eventos_extraidos = extrair_eventos_dos_contratos(textos_docs)
+            if eventos_extraidos:
+                df = pd.DataFrame(eventos_extraidos)
+                st.session_state.eventos_contratuais_df = df
+            else:
+                st.warning("Nenhum evento ou prazo foi extraído dos documentos.")
+        else:
+            st.error("Falha ao reconstruir textos dos documentos da coleção.")
+
     if 'eventos_contratuais_df' in st.session_state and not st.session_state.eventos_contratuais_df.empty:
         st.dataframe(st.session_state.eventos_contratuais_df, use_container_width=True)
 
-def render_conformidade_tab(arquivos_originais):
-    """Renderiza a aba de Verificação de Conformidade."""
+def render_conformidade_tab(vector_store, nomes_arquivos):
     st.header("⚖️ Verificador de Conformidade Contratual")
-    if not arquivos_originais or len(arquivos_originais) < 2:
-        st.info("Faça o upload de pelo menos dois documentos para usar esta função.")
+    if len(nomes_arquivos) < 2:
+        st.info("É necessário ter pelo menos dois documentos na coleção para usar esta função.")
         return
 
-    nomes_arquivos = [f.name for f in arquivos_originais]
     col1, col2 = st.columns(2)
     with col1:
         doc_ref_nome = st.selectbox("Documento de Referência:", nomes_arquivos, key="ref_conf", index=None)
@@ -176,24 +211,22 @@ def render_conformidade_tab(arquivos_originais):
         doc_ana_nome = st.selectbox("Documento a Analisar:", [n for n in nomes_arquivos if n != doc_ref_nome], key="ana_conf", index=None)
 
     if st.button("🔎 Verificar Conformidade", key="btn_conf", use_container_width=True, disabled=not (doc_ref_nome and doc_ana_nome)):
-        doc_ref_obj = next(f for f in arquivos_originais if f.name == doc_ref_nome)
-        doc_ana_obj = next(f for f in arquivos_originais if f.name == doc_ana_nome)
-        
-        texto_ref = _get_full_text(doc_ref_obj)
-        texto_ana = _get_full_text(doc_ana_obj)
+        with st.spinner("Preparando textos para comparação..."):
+            texto_ref = _get_full_text_from_vector_store(vector_store, doc_ref_nome)
+            texto_ana = _get_full_text_from_vector_store(vector_store, doc_ana_nome)
 
         if texto_ref and texto_ana:
             resultado = verificar_conformidade_documento(texto_ref, doc_ref_nome, texto_ana, doc_ana_nome)
             st.session_state.conformidade_resultados = resultado
+        else:
+            st.error("Não foi possível reconstruir o texto de um ou ambos os documentos para comparação.")
             
-    if 'conformidade_resultados' in st.session_state and st.session_state.conformidade_resultados:
+    if 'conformidade_resultados' in st.session_state:
         st.markdown("---")
         st.subheader("Relatório de Conformidade")
         st.markdown(st.session_state.conformidade_resultados)
 
-
 def render_anomalias_tab():
-    """Renderiza a aba de Detecção de Anomalias."""
     st.header("📊 Detecção de Anomalias Contratuais")
     
     if 'df_dashboard' not in st.session_state or st.session_state.df_dashboard.empty:
@@ -204,7 +237,7 @@ def render_anomalias_tab():
         resultados = detectar_anomalias_no_dataframe(st.session_state.df_dashboard)
         st.session_state.anomalias_resultados = resultados
 
-    if 'anomalias_resultados' in st.session_state and st.session_state.anomalias_resultados:
+    if 'anomalias_resultados' in st.session_state:
         st.subheader("Resultados da Detecção de Anomalias:")
         for item in st.session_state.anomalias_resultados:
             st.markdown(f"- {item}")
