@@ -1,5 +1,5 @@
 import firebase_admin
-from firebase_admin import credentials, firestore, storageAdd commentMore actions
+from firebase_admin import credentials, firestore, storage
 
 # Importações do LangChain e Pydantic
 # --- IMPORTAÇÕES DO GOOGLE E LANGCHAIN ---
