@@ -125,10 +125,7 @@ def main():
     # Este CSS oculta a barra de ferramentas superior e o botão de deploy/manage app
     st.markdown("""
         <style>
-            /* Oculta a barra de ferramentas superior (Share, etc.) */
-            div[data-testid="stToolbar"] {
-                display: none !important;
-            }
+           
             /* Oculta o botão de deploy/manage app */
             div[data-testid="stDeployButton"] {
                 display: none !important;
