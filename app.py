@@ -119,7 +119,7 @@ def render_main_app(db, BUCKET_NAME, embeddings):
 
 def main():
     """Função principal que gerencia o fluxo da aplicação."""
-    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="�")
+    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
     # Este CSS oculta a barra de ferramentas e o botão de deploy
     st.markdown("""
@@ -127,7 +127,7 @@ def main():
             div[data-testid="stToolbar"] {
                 display: none !important;
             }
-            div[data-testid="stDeployButton"] {
+            div[data-testid="manage-app-button"] {
                 display: none !important;
             }
         </style>
