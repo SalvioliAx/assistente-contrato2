@@ -31,7 +31,7 @@ from ui_tabs import (
 
 def main():
     """Função principal que executa a aplicação Streamlit."""
-    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
+    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="�")
     hide_streamlit_style = "<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;}</style>"
     st.markdown(hide_streamlit_style, unsafe_allow_html=True)
     st.title("💡 Analisador-IA ProMax")
@@ -45,13 +45,14 @@ def main():
         except Exception as e:
             st.sidebar.error(f"Erro ao inicializar embeddings: {e}")
 
-    # Inicializa o estado da sessão
+    # Inicializa o estado da sessão se não existir
     if "messages" not in st.session_state:
-        st.session_state.clear()
         st.session_state.messages = []
         st.session_state.vector_store = None
         st.session_state.arquivos_pdf_originais = None
         st.session_state.colecao_ativa = None
+        st.session_state.nomes_arquivos = []
+
 
     with st.sidebar:
         st.image("https://i.imgur.com/aozL2jD.png", width=100)
@@ -68,11 +69,13 @@ def main():
             if st.button("Processar Documentos", use_container_width=True, disabled=not arquivos):
                 vs, nomes = obter_vector_store_de_uploads(arquivos, embeddings)
                 if vs and nomes:
-                    st.session_state.clear()
+                    # --- CORREÇÃO: Removido st.session_state.clear() ---
+                    # Apenas atualizamos as chaves necessárias
                     st.session_state.messages = []
                     st.session_state.vector_store = vs
                     st.session_state.nomes_arquivos = nomes
                     st.session_state.arquivos_pdf_originais = arquivos
+                    st.session_state.colecao_ativa = None # Garante que estamos no modo de upload
                     st.success(f"{len(nomes)} documento(s) processado(s)!")
                     st.rerun()
 
@@ -81,14 +84,15 @@ def main():
             if colecoes:
                 sel = st.selectbox("Escolha uma coleção:", colecoes, index=None, placeholder="Selecione...", key="select_colecao")
                 if st.button("Carregar Coleção", use_container_width=True, disabled=not sel):
-                    # A chamada aqui permanece a mesma, a mudança foi na definição da função
                     vs, nomes = carregar_colecao(db, embeddings, sel)
                     if vs and nomes:
-                        st.session_state.clear()
+                        # --- CORREÇÃO: Removido st.session_state.clear() ---
+                        # Apenas atualizamos as chaves necessárias
                         st.session_state.messages = []
                         st.session_state.vector_store = vs
                         st.session_state.nomes_arquivos = nomes
                         st.session_state.colecao_ativa = sel
+                        st.session_state.arquivos_pdf_originais = None # Garante que não há arquivos de upload
                         st.rerun()
             else:
                 st.info("Nenhuma coleção salva no Firebase.")
@@ -130,3 +134,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+�
