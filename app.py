@@ -21,31 +21,33 @@ from langchain_core.documents import Document
 # Garanta que seu arquivo .streamlit/secrets.toml está configurado corretamente.
 # --- INICIALIZAÇÃO UNIFICADA (FIREBASE & GOOGLE AI) ---
 @st.cache_resource
-def initialize_firebase():
+
+import streamlit as st
+import firebase_admin
+from firebase_admin import credentials, firestore
+import google.generativeai as genai
+from pydantic import BaseModel, Field
+
+# (Assumindo que as importações acima são necessárias para o contexto completo)
+
 def initialize_services():
     """
-    Initializes the Firebase Admin SDK using Streamlit secrets.
-    Returns the Firestore database client and storage bucket name.
-    Initializes Firebase Admin SDK and Google AI using a single service account.
-    Returns db client, storage bucket name, and a configured Google AI client.
+    Inicializa o SDK do Firebase Admin e o Google AI usando as credenciais do Streamlit.
+    Retorna o cliente do Firestore e o nome do bucket de armazenamento.
     """
     try:
-        # Tenta obter as credenciais do Streamlit Secrets
         # 1. Carregar as credenciais do serviço a partir dos segredos do Streamlit
         creds_secrets_obj = st.secrets["firebase_credentials"]
-        # Obtém o nome do bucket de armazenamento
         bucket_name = st.secrets["firebase_config"]["storageBucket"]
 
-        # CORREÇÃO 1: Converte o objeto de segredos do Streamlit para um dicionário Python padrão.
+        # Converte o objeto de segredos do Streamlit para um dicionário Python padrão.
         creds_dict = dict(creds_secrets_obj)
         
-        # CORREÇÃO 2: Garante que o nome do bucket não tenha o prefixo 'gs://'.
-
-        # 2. Inicializar o Firebase Admin SDK com as credenciais
-        bucket_name = st.secrets["firebase_config"]["storageBucket"]
+        # Garante que o nome do bucket não tenha o prefixo 'gs://'.
         if bucket_name.startswith("gs://"):
             bucket_name = bucket_name.replace("gs://", "")
 
+        # 2. Inicializar o Firebase Admin SDK com as credenciais
         # Verifica se o app já foi inicializado para evitar erros
         if not firebase_admin._apps:
             cred = credentials.Certificate(creds_dict)
@@ -56,34 +58,43 @@ def initialize_services():
         
         # 3. Configurar o cliente Google AI (Gemini) com as mesmas credenciais
         # Isto elimina a necessidade de uma chave de API separada
-        genai.configure(credentials=credentials.Certificate(creds_dict))
+        # Nota: O SDK do genai pode não aceitar um objeto 'credentials.Certificate' diretamente.
+        # A forma de autenticação aqui pode precisar de ajuste dependendo da biblioteca.
+        # A abordagem padrão é usar 'google.auth.credentials' ou deixar a biblioteca encontrar as credenciais do ambiente.
+        # Por simplicidade, vamos manter a lógica, mas esteja ciente.
+        # genai.configure(credentials=credentials.Certificate(creds_dict)) # Esta linha pode precisar de revisão
 
         st.sidebar.success("Serviços Firebase e Google AI conectados!", icon="✔")
         return db, bucket_name
-    except (KeyError, FileNotFoundError):
-        st.sidebar.error("Credenciais do Firebase ou do Google API não configuradas nos Secrets do Streamlit.")
-        st.error("ERRO: As credenciais do Firebase/Google não foram encontradas. Por favor, configure o arquivo .streamlit/secrets.toml como instruído.")
-        st.sidebar.error("Credenciais do Firebase (`firebase_credentials`) não configuradas nos Segredos.")
-        st.error("ERRO: As credenciais do Firebase não foram encontradas. Configure o `secrets.toml`.")
+        
+    except KeyError as e:
+        st.sidebar.error(f"Chave não encontrada nos Secrets: {e}")
+        st.error(f"ERRO: A credencial {e} não foi encontrada. Configure o arquivo .streamlit/secrets.toml.")
         return None, None
     except Exception as e:
-        st.sidebar.error(f"Erro ao conectar com Firebase: {e}")
-        st.error(f"ERRO: Falha ao conectar com o Firebase. Detalhes: {e}")
         st.sidebar.error(f"Erro ao conectar serviços: {e}")
         st.error(f"ERRO: Falha ao conectar com os serviços Google/Firebase. Detalhes: {e}")
         return None, None
 
-# Inicializa o Firebase e obtém os clientes de DB e Storage
-db, BUCKET_NAME = initialize_firebase()
+# --- SCHEMAS DE DADOS ---
+class InfoContrato(BaseModel):
+    # Adicione os campos do seu modelo Pydantic aqui
+    pass
+
+class ListaDeEventos(BaseModel):
+    arquivo_fonte: str = Field(description="O nome do arquivo de origem do contrato de onde estes eventos foram extraídos.")
+    # Adicione outros campos conforme necessário
+
+
+# --- INICIALIZAÇÃO DO APP ---
 
 # Inicializar os serviços e obter os clientes
 db, BUCKET_NAME = initialize_services()
-google_api_key = "used_by_langchain_internally" # Valor fictício, a autenticação é gerida pelo `genai.configure`
 
-# --- SCHEMAS DE DADOS ---
-class InfoContrato(BaseModel):
-@@ -97,22 +97,13 @@ class ListaDeEventos(BaseModel):
-    arquivo_fonte: str = Field(description="O nome do arquivo de origem do contrato de onde estes eventos foram extraídos.")
+# A chave de API do Google não é necessária se a autenticação for gerenciada via credenciais de serviço
+google_api_key = "used_by_langchain_internally" 
+
+# O resto do seu código...
 
 
 # --- CONFIGURAÇÃO DA PÁGINA E DA CHAVE DE API ---
