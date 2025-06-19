@@ -119,9 +119,19 @@ def render_main_app(db, BUCKET_NAME, embeddings):
 
 def main():
     """Função principal que gerencia o fluxo da aplicação."""
-    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
+    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="�")
     
-    # Bloco de CSS removido
+    # Este CSS oculta a barra de ferramentas e o botão de deploy
+    st.markdown("""
+        <style>
+            div[data-testid="stToolbar"] {
+                display: none !important;
+            }
+            div[data-testid="stDeployButton"] {
+                display: none !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
     
     db, BUCKET_NAME = initialize_services()
     if not db:
@@ -143,3 +153,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+�
