@@ -42,15 +42,13 @@ def initialize_firebase():
     """
     try:
         # Tenta obter as credenciais do Streamlit Secrets
-        creds_dict = st.secrets["firebase_credentials"]
+        creds_secrets_obj = st.secrets["firebase_credentials"]
         # Obtém o nome do bucket de armazenamento
         bucket_name = st.secrets["firebase_config"]["storageBucket"]
 
-        # CORREÇÃO: Garante que as credenciais sejam um dicionário.
-        # O Streamlit pode ler o objeto JSON dos segredos como uma string.
-        # Esta verificação converte a string para um dicionário, se necessário.
-        if isinstance(creds_dict, str):
-            creds_dict = json.loads(creds_dict)
+        # CORREÇÃO DEFINITIVA: Converte o objeto de segredos do Streamlit para um dicionário Python padrão.
+        # Isto garante que a biblioteca do Firebase recebe os dados no formato exato que espera.
+        creds_dict = dict(creds_secrets_obj)
         
         # Verifica se o app já foi inicializado para evitar erros
         if not firebase_admin._apps:
@@ -61,8 +59,8 @@ def initialize_firebase():
         st.sidebar.success("Conexão com Firebase estabelecida!", icon="🔥")
         return db, bucket_name
     except (KeyError, FileNotFoundError):
-        st.sidebar.error("Credenciais do Firebase não configuradas nos Secrets do Streamlit.")
-        st.error("ERRO: As credenciais do Firebase não foram encontradas. Por favor, configure o arquivo .streamlit/secrets.toml como instruído.")
+        st.sidebar.error("Credenciais do Firebase ou do Google API não configuradas nos Secrets do Streamlit.")
+        st.error("ERRO: As credenciais do Firebase/Google não foram encontradas. Por favor, configure o arquivo .streamlit/secrets.toml como instruído.")
         return None, None
     except Exception as e:
         st.sidebar.error(f"Erro ao conectar com Firebase: {e}")
