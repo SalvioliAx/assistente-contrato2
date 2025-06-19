@@ -62,11 +62,9 @@ def salvar_colecao_atual(db_client, bucket_name, nome_colecao, vector_store_atua
     with st.spinner(f"Salvando coleção '{nome_colecao}' no Firebase..."):
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
-                # Salva o índice FAISS em uma pasta temporária
                 faiss_path = Path(temp_dir) / "faiss_index"
                 vector_store_atual.save_local(str(faiss_path))
 
-                # Compacta a pasta do índice em um arquivo .zip
                 zip_path_temp = Path(tempfile.gettempdir()) / f"{nome_colecao}.zip"
                 with zipfile.ZipFile(zip_path_temp, 'w', zipfile.ZIP_DEFLATED) as zipf:
                     for root, _, files in os.walk(faiss_path):
@@ -75,13 +73,11 @@ def salvar_colecao_atual(db_client, bucket_name, nome_colecao, vector_store_atua
                             relative_path = full_path.relative_to(Path(temp_dir))
                             zipf.write(full_path, arcname=relative_path)
 
-                # Faz o upload do .zip para o Firebase Storage
-                bucket = storage.bucket() # Bucket já configurado na inicialização
+                bucket = storage.bucket()
                 blob_path = f"collections/{nome_colecao}.zip"
                 blob = bucket.blob(blob_path)
                 blob.upload_from_filename(str(zip_path_temp))
 
-                # Salva os metadados (nomes dos arquivos) no Firestore
                 doc_ref = db_client.collection('ia_collections').document(nome_colecao)
                 doc_ref.set({
                     'nomes_arquivos': nomes_arquivos_atuais,
@@ -89,23 +85,25 @@ def salvar_colecao_atual(db_client, bucket_name, nome_colecao, vector_store_atua
                     'created_at': firestore.SERVER_TIMESTAMP
                 })
 
-                os.remove(zip_path_temp) # Limpa o arquivo zip local
+                os.remove(zip_path_temp)
                 st.success(f"Coleção '{nome_colecao}' salva com sucesso!")
                 return True
             except Exception as e:
                 st.error(f"Erro ao salvar coleção no Firebase: {e}")
                 return False
 
+# --- CORREÇÃO APLICADA AQUI ---
+# Adicionado '_' aos parâmetros _db_client e _embeddings_obj para indicar ao
+# Streamlit que eles não devem ser "hasheados" pelo cache.
 @st.cache_resource(show_spinner="Carregando coleção do Firebase...")
-def carregar_colecao(db_client, _embeddings_obj, nome_colecao):
+def carregar_colecao(_db_client, _embeddings_obj, nome_colecao):
     """Baixa uma coleção do Storage e a carrega em memória."""
-    if not db_client:
+    if not _db_client:
         st.error("Conexão com Firebase não disponível para carregar.")
         return None, None
         
     try:
-        # Pega os metadados do Firestore
-        doc_ref = db_client.collection('ia_collections').document(nome_colecao)
+        doc_ref = _db_client.collection('ia_collections').document(nome_colecao)
         doc = doc_ref.get()
         if not doc.exists:
             st.error(f"Coleção '{nome_colecao}' não encontrada no Firestore.")
@@ -115,7 +113,6 @@ def carregar_colecao(db_client, _embeddings_obj, nome_colecao):
         storage_path = metadata.get('storage_path')
         nomes_arquivos = metadata.get('nomes_arquivos')
 
-        # Baixa o arquivo .zip do Storage
         bucket = storage.bucket()
         blob = bucket.blob(storage_path)
 
@@ -124,7 +121,6 @@ def carregar_colecao(db_client, _embeddings_obj, nome_colecao):
             st.info(f"Baixando índice de '{nome_colecao}'...")
             blob.download_to_filename(str(zip_path_temp))
 
-            # Descompacta o arquivo e carrega o índice FAISS
             unzip_path = Path(temp_dir) / "unzipped"
             unzip_path.mkdir()
             with zipfile.ZipFile(zip_path_temp, 'r') as zip_ref:
