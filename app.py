@@ -3,11 +3,14 @@
 Ponto de entrada principal da aplicação Streamlit "Analisador-IA ProMax".
 """
 import streamlit as st
-import os
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from google.cloud import secretmanager
 
-from firebase_utils import initialize_services, listar_colecoes_salvas, salvar_colecao_atual, carregar_colecao
+from firebase_utils import (
+    initialize_services, 
+    listar_colecoes_salvas, 
+    salvar_colecao_atual, 
+    carregar_colecao
+)
 from auth_utils import register_user, login_user
 from pdf_processing import obter_vector_store_de_uploads
 from ui_tabs import (
@@ -16,43 +19,52 @@ from ui_tabs import (
     render_anomalias_tab
 )
 
-@st.cache_resource
-def setup_api_key():
-    """Obtém a chave de API da Google do Secret Manager e define-a como uma variável de ambiente."""
-    try:
-        project_id = "contratiapy"
-        secret_id = "google-api-key"
-        version_id = "latest"
-        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
-        
-        client = secretmanager.SecretManagerServiceClient()
-        response = client.access_secret_version(name=name)
-        api_key = response.payload.data.decode("UTF-8")
-        
-        # Define a variável de ambiente que todas as bibliotecas irão usar
-        os.environ["GOOGLE_API_KEY"] = api_key
-        return api_key
-    except Exception as e:
-        st.error(f"Não foi possível obter a Chave de API do Secret Manager: {e}")
-        return None
-
 def render_login_page(db):
+    """Renderiza a página de login e cadastro."""
     st.title("Bem-vindo ao Analisador-IA ProMax")
-    # ... (código inalterado)
+   
+    
+    login_tab, register_tab = st.tabs(["Login", "Cadastrar"])
+
+    with login_tab:
+        with st.form("login_form"):
+            email = st.text_input("E-mail")
+            password = st.text_input("Senha", type="password")
+            submitted = st.form_submit_button("Login")
+            if submitted:
+                user_id = login_user(email, password)
+                if user_id:
+                    st.session_state.logged_in = True
+                    st.session_state.user_id = user_id
+                    st.session_state.user_email = email
+                    st.rerun()
+
+    with register_tab:
+        with st.form("register_form"):
+            new_email = st.text_input("Seu E-mail")
+            new_password = st.text_input("Crie uma Senha", type="password")
+            confirm_password = st.text_input("Confirme a Senha", type="password")
+            submitted = st.form_submit_button("Cadastrar")
+            if submitted:
+                if new_password == confirm_password:
+                    register_user(new_email, new_password)
+                else:
+                    st.error("As senhas não coincidem.")
 
 def render_main_app(db, BUCKET_NAME, embeddings):
+    """Renderiza a aplicação principal após o login."""
     st.sidebar.title(f"Bem-vindo(a)!")
     st.sidebar.caption(st.session_state.user_email)
     
     with st.sidebar:
         st.header("Gerenciar Documentos")
         user_id = st.session_state.user_id
+
         modo = st.radio("Carregar documentos:", ("Novo Upload", "Carregar Coleção"), key="modo_carregamento")
 
         if modo == "Novo Upload":
             arquivos = st.file_uploader("Selecione PDFs", type="pdf", accept_multiple_files=True, key="upload_arquivos")
             if st.button("Processar Documentos", use_container_width=True, disabled=not arquivos):
-                # Já não precisamos de passar a chave de API
                 vs, nomes = obter_vector_store_de_uploads(arquivos, embeddings)
                 if vs and nomes:
                     st.session_state.messages = []
@@ -60,9 +72,21 @@ def render_main_app(db, BUCKET_NAME, embeddings):
                     st.session_state.nomes_arquivos = nomes
                     st.session_state.colecao_ativa = None
                     st.rerun()
+
         else: # Carregar Coleção
-            # ... (código inalterado)
-            pass
+            colecoes = listar_colecoes_salvas(db, user_id)
+            if colecoes:
+                sel = st.selectbox("Escolha uma coleção:", colecoes, index=None, placeholder="Selecione...", key="select_colecao")
+                if st.button("Carregar Coleção", use_container_width=True, disabled=not sel):
+                    vs, nomes = carregar_colecao(db, embeddings, user_id, sel)
+                    if vs and nomes:
+                        st.session_state.messages = []
+                        st.session_state.vector_store = vs
+                        st.session_state.nomes_arquivos = nomes
+                        st.session_state.colecao_ativa = sel
+                        st.rerun()
+            else:
+                st.info("Nenhuma coleção salva.")
 
         if st.session_state.get("vector_store") and modo == "Novo Upload":
             st.markdown("---")
@@ -94,19 +118,30 @@ def render_main_app(db, BUCKET_NAME, embeddings):
         with tabs[6]: render_anomalias_tab()
 
 def main():
+    """Função principal que gerencia o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
-    # Carrega a chave de API e define a variável de ambiente
-    api_key = setup_api_key()
-    if not api_key:
-        st.error("A aplicação não pode iniciar sem uma Chave de API da Google válida.")
-        return
-
+    # --- CORREÇÃO APLICADA AQUI ---
+    # Este CSS oculta o rodapé e o avatar do criador da app.
+    st.markdown("""
+        <style>
+            footer {
+                visibility: hidden;
+            }
+            [data-testid="appCreatorAvatar"] {
+                display: none;
+            }
+            div[data-testid="stDeployButton"] {
+                display: none;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    
     db, BUCKET_NAME = initialize_services()
     if not db:
         st.error("Falha na conexão com o banco de dados.")
         return
-        
+
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
     if "logged_in" not in st.session_state:
@@ -117,6 +152,7 @@ def main():
     else:
         if "vector_store" not in st.session_state:
             st.session_state.vector_store = None
+        
         render_main_app(db, BUCKET_NAME, embeddings)
 
 if __name__ == "__main__":
