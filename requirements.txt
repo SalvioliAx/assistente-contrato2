@@ -11,9 +11,12 @@ numpy==1.26.4
 # Firebase
 firebase-admin==6.5.0
 
-# LangChain e IA da Google
+# Google Cloud Services
 # --- CORREÇÃO APLICADA AQUI ---
-# Adicionado o pacote principal 'langchain' que estava em falta
+# Adicionada a biblioteca para aceder ao Secret Manager
+google-cloud-secret-manager==2.19.0
+
+# LangChain e IA da Google
 langchain==0.1.20
 langchain-google-genai==1.0.3
 langchain-core==0.1.52
