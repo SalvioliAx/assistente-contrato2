@@ -3,7 +3,6 @@
 Ponto de entrada principal da aplicação Streamlit "Analisador-IA ProMax".
 """
 import streamlit as st
-import os
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from google.cloud import secretmanager
 
@@ -78,7 +77,6 @@ def render_main_app(db, BUCKET_NAME, embeddings, api_key):
         if modo == "Novo Upload":
             arquivos = st.file_uploader("Selecione PDFs", type="pdf", accept_multiple_files=True, key="upload_arquivos")
             if st.button("Processar Documentos", use_container_width=True, disabled=not arquivos):
-                # Passa a chave de API para a função de processamento
                 vs, nomes = obter_vector_store_de_uploads(arquivos, embeddings, api_key)
                 if vs and nomes:
                     st.session_state.messages = []
@@ -86,7 +84,7 @@ def render_main_app(db, BUCKET_NAME, embeddings, api_key):
                     st.session_state.nomes_arquivos = nomes
                     st.session_state.colecao_ativa = None
                     st.rerun()
-        else: # Carregar Coleção
+        else:
             colecoes = listar_colecoes_salvas(db, user_id)
             if colecoes:
                 sel = st.selectbox("Escolha uma coleção:", colecoes, index=None, placeholder="Selecione...", key="select_colecao")
@@ -122,16 +120,16 @@ def render_main_app(db, BUCKET_NAME, embeddings, api_key):
         vector_store = st.session_state.vector_store
         nomes_arquivos = st.session_state.nomes_arquivos
         
-        # Passa a chave de API para todas as funções de renderização de abas
         with tabs[0]: render_chat_tab(vector_store, nomes_arquivos, api_key)
         with tabs[1]: render_dashboard_tab(vector_store, nomes_arquivos, api_key)
         with tabs[2]: render_resumo_tab(vector_store, nomes_arquivos, api_key)
         with tabs[3]: render_riscos_tab(vector_store, nomes_arquivos, api_key)
         with tabs[4]: render_prazos_tab(vector_store, nomes_arquivos, api_key)
         with tabs[5]: render_conformidade_tab(vector_store, nomes_arquivos, api_key)
-        with tabs[6]: render_anomalias_tab()
+        with tabs[6]: render_anomalias_tab(api_key)
 
 def main():
+    """Função principal que gerencia o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
     api_key = get_google_api_key()
