@@ -1,14 +1,9 @@
 # pdf_processing.py
-"""
-Este módulo contém toda a lógica para processamento de arquivos PDF.
-Isso inclui extração de texto usando múltiplos métodos e a criação
-de um Vector Store com FAISS para busca de similaridade.
-"""
-import tempfile
 import streamlit as st
 import os
+import tempfile
 from pathlib import Path
-import fitz  # PyMuPDF
+import fitz
 import base64
 import time
 from langchain_community.document_loaders import PyPDFLoader
@@ -19,7 +14,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.documents import Document
 
 def _extrair_texto_com_gemini(pdf_bytes, nome_arquivo, llm_vision):
-    """Função auxiliar para extrair texto de um PDF usando Gemini Vision."""
     documentos_gemini = []
     texto_extraido = False
     try:
@@ -30,7 +24,7 @@ def _extrair_texto_com_gemini(pdf_bytes, nome_arquivo, llm_vision):
             page_obj = doc_fitz_vision.load_page(page_num)
             pix = page_obj.get_pixmap(dpi=300) 
             img_bytes = pix.tobytes("png")
-            base64_image = base64.b64encode(img_bytes).decode('utf-8')
+            base64_image = base64.b64encode(img_bytes).decode('UTF-8')
 
             human_message = HumanMessage(
                 content=[
@@ -46,7 +40,7 @@ def _extrair_texto_com_gemini(pdf_bytes, nome_arquivo, llm_vision):
                 doc = Document(page_content=ai_msg.content, metadata={"source": nome_arquivo, "page": page_num, "method": "gemini_vision"})
                 documentos_gemini.append(doc)
                 texto_extraido = True
-            time.sleep(2) # Respeitar limites da API
+            time.sleep(2)
         
         if texto_extraido:
             st.success(f"Texto extraído com Gemini Vision para {nome_arquivo}.")
@@ -58,18 +52,21 @@ def _extrair_texto_com_gemini(pdf_bytes, nome_arquivo, llm_vision):
     
     return documentos_gemini, texto_extraido
 
-@st.cache_resource(show_spinner="Analisando documentos para busca e chat...")
-def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
-    """
-    Processa uma lista de arquivos PDF, extrai texto e cria um Vector Store FAISS.
-    Tenta múltiplos métodos de extração: PyPDFLoader, PyMuPDF e Gemini Vision como fallback.
-    """
+# --- ALTERAÇÃO APLICADA AQUI ---
+@st.cache_resource
+def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj, api_key):
     if not lista_arquivos_pdf_upload:
         return None, None
 
     documentos_totais = []
     nomes_arquivos_processados = []
-    llm_vision = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.1, request_timeout=300)
+    
+    # --- ALTERAÇÃO APLICADA AQUI ---
+    llm_vision = ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash-latest", 
+        temperature=0.1, 
+        google_api_key=api_key
+    )
 
     for arquivo_pdf in lista_arquivos_pdf_upload:
         nome_arquivo = arquivo_pdf.name
@@ -78,12 +75,10 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
         docs_arquivo_atual = []
         sucesso = False
         
-        # Escreve arquivo em disco temporariamente para os loaders usarem
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(arquivo_pdf.getvalue())
             tmp_path = tmp.name
 
-        # Tentativa 1: PyPDFLoader
         try:
             loader = PyPDFLoader(tmp_path)
             pages = loader.load()
@@ -96,7 +91,6 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
         except Exception as e:
             st.write(f"PyPDFLoader falhou para {nome_arquivo}: {e}. Tentando PyMuPDF.")
 
-        # Tentativa 2: PyMuPDF (fitz)
         if not sucesso:
             try:
                 doc_fitz = fitz.open(tmp_path)
@@ -110,7 +104,6 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
             except Exception as e:
                 st.write(f"PyMuPDF falhou para {nome_arquivo}: {e}. Tentando Gemini Vision.")
         
-        # Tentativa 3: Gemini Vision
         if not sucesso and llm_vision:
             st.write(f"Tentando Gemini Vision para {nome_arquivo}...")
             arquivo_pdf.seek(0)
@@ -120,7 +113,7 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
                 docs_arquivo_atual = docs_gemini
                 sucesso = True
 
-        os.remove(tmp_path) # Remove o arquivo temporário
+        os.remove(tmp_path)
 
         if sucesso:
             documentos_totais.extend(docs_arquivo_atual)
@@ -131,7 +124,6 @@ def obter_vector_store_de_uploads(lista_arquivos_pdf_upload, _embeddings_obj):
     if not documentos_totais:
         return None, []
 
-    # Divide os documentos e cria o Vector Store
     try:
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
         docs_fragmentados = text_splitter.split_documents(documentos_totais)
