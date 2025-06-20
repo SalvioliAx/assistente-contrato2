@@ -1,11 +1,23 @@
-streamlit
-pandas
-numpy
-firebase-admin
-langchain
-langchain-community
-langchain-google-genai
-pydantic
-PyMuPDF
-Pillow
-faiss-cpu
+# requirements.txt
+# Versões fixas para garantir um build estável no Google Cloud Run
+
+streamlit==1.35.0
+gunicorn==22.0.0
+
+# Bibliotecas principais
+pandas==2.2.2
+numpy==1.26.4
+
+# Firebase
+firebase-admin==6.5.0
+
+# LangChain e IA da Google
+langchain-google-genai==1.0.3
+langchain-core==0.1.52
+langchain-community==0.0.38
+pydantic==2.7.1
+faiss-cpu==1.8.0
+
+# Processamento de PDF
+PyMuPDF==1.24.1
+Pillow==10.3.0
