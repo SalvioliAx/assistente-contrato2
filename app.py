@@ -4,6 +4,7 @@ Ponto de entrada principal da aplicação Streamlit "Analisador-IA ProMax".
 """
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from google.cloud import secretmanager # Importar o cliente do Secret Manager
 
 from firebase_utils import (
     initialize_services, 
@@ -19,10 +20,28 @@ from ui_tabs import (
     render_anomalias_tab
 )
 
+# --- NOVA FUNÇÃO AUXILIAR ---
+@st.cache_resource
+def get_google_api_key():
+    """Obtém a chave de API da Google do Secret Manager."""
+    try:
+        project_id = "contratiapy"
+        secret_id = "google-api-key" # O novo segredo que criámos
+        version_id = "latest"
+        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+        
+        client = secretmanager.SecretManagerServiceClient()
+        response = client.access_secret_version(name=name)
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        st.error(f"Não foi possível obter a Chave de API do Secret Manager: {e}")
+        return None
+
+
 def render_login_page(db):
     """Renderiza a página de login e cadastro."""
     st.title("Bem-vindo ao Analisador-IA ProMax")
-   
+    st.image("https://i.imgur.com/aozL2jD.png", width=120)
     
     login_tab, register_tab = st.tabs(["Login", "Cadastrar"])
 
@@ -72,8 +91,7 @@ def render_main_app(db, BUCKET_NAME, embeddings):
                     st.session_state.nomes_arquivos = nomes
                     st.session_state.colecao_ativa = None
                     st.rerun()
-
-        else: # Carregar Coleção
+        else:
             colecoes = listar_colecoes_salvas(db, user_id)
             if colecoes:
                 sel = st.selectbox("Escolha uma coleção:", colecoes, index=None, placeholder="Selecione...", key="select_colecao")
@@ -121,28 +139,20 @@ def main():
     """Função principal que gerencia o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
     
-    # --- CORREÇÃO APLICADA AQUI ---
-    # Este CSS oculta o rodapé e o avatar do criador da app.
-    st.markdown("""
-        <style>
-            footer {
-                visibility: hidden;
-            }
-            [data-testid="appCreatorAvatar"] {
-                display: none;
-            }
-            div[data-testid="stDeployButton"] {
-                display: none;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-    
     db, BUCKET_NAME = initialize_services()
     if not db:
-        st.error("Falha na conexão com o banco de dados.")
+        st.error("Falha na conexão com o banco de dados. Verifique os logs do serviço.")
         return
 
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    # --- CORREÇÃO APLICADA AQUI ---
+    # Obtemos a chave de API do Secret Manager e passamo-la diretamente
+    # ao construtor da biblioteca de embeddings.
+    api_key = get_google_api_key()
+    if not api_key:
+        st.error("A Chave de API da Google não pôde ser carregada. A aplicação não pode continuar.")
+        return
+        
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
 
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
@@ -152,7 +162,6 @@ def main():
     else:
         if "vector_store" not in st.session_state:
             st.session_state.vector_store = None
-        
         render_main_app(db, BUCKET_NAME, embeddings)
 
 if __name__ == "__main__":
