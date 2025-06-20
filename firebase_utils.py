@@ -28,7 +28,7 @@ def initialize_services():
             # Isto irá funcionar quando a aplicação estiver a correr no Cloud Run.
             try:
                 # Substitua 'seu-id-de-projeto' e 'firebase-credentials' pelos seus valores.
-                project_id = "seu-id-de-projeto" # <-- SUBSTITUA PELO SEU ID DE PROJETO
+                project_id = "contratiapy" # <-- SUBSTITUA PELO SEU ID DE PROJETO
                 secret_id = "firebase-credentials" # <-- O NOME QUE DEU AO SEGREDO
                 version_id = "latest"
                 
