@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from langchain_community.vectorstores import FAISS
 import tempfile
+import zipfile  # <-- CORREÇÃO: Módulo importado
 
 # Importar o cliente do Secret Manager
 from google.cloud import secretmanager
@@ -26,9 +27,6 @@ def initialize_services():
         if not firebase_admin._apps:
             project_id = "contratiapy"
             
-            # No Cloud Run, as bibliotecas da Google detetam as credenciais automaticamente.
-            # No entanto, o Firebase Admin SDK precisa de ser inicializado explicitamente.
-            # Vamos usar o Secret Manager para obter as credenciais apenas para o Firebase.
             try:
                 # Obter credenciais do Secret Manager (para produção no Cloud Run)
                 secret_id = "firebase-credentials"
@@ -43,9 +41,7 @@ def initialize_services():
                 firebase_admin.initialize_app(cred, app_options)
 
             except Exception as e_secret:
-                # Se o Secret Manager falhar (por exemplo, ao correr localmente),
-                # tentamos a inicialização padrão. Isto irá funcionar localmente se
-                # tiver executado `gcloud auth application-default login` no seu terminal.
+                # Se o Secret Manager falhar (por exemplo, ao correr localmente)
                 st.warning(f"Não foi possível carregar as credenciais do Secret Manager ({e_secret}). A tentar usar as credenciais padrão do ambiente (ADC).")
                 try:
                     cred = credentials.ApplicationDefault()
@@ -55,10 +51,6 @@ def initialize_services():
                      st.error(f"Falha na inicialização padrão do Firebase. Certifique-se de que está autenticado se estiver a correr localmente. Erro: {e_default}")
                      return None, None
 
-        # As outras bibliotecas (Langchain, SecretManager client, etc.) irão usar
-        # automaticamente as credenciais do ambiente (ADC), não sendo necessária
-        # mais nenhuma configuração manual.
-
         db_client = firestore.client()
         bucket_name = storage.bucket().name
         
@@ -67,7 +59,6 @@ def initialize_services():
         st.error(f"ERRO: Falha crítica ao inicializar os serviços. Detalhes: {e}")
         return None, None
 
-# O resto das funções (listar_colecoes_salvas, etc.) não precisa de ser alterado.
 def listar_colecoes_salvas(db_client, user_id):
     if not db_client or not user_id: return []
     try:
@@ -138,7 +129,7 @@ def carregar_colecao(_db_client, _embeddings_obj, user_id, nome_colecao):
             with zipfile.ZipFile(zip_path_temp, 'r') as zip_ref:
                 zip_ref.extractall(unzip_path)
             
-            faiss_index_path = unzip_path / "faiss_index"
+            faiss_index_path = unzip_path / "unzipped" / "faiss_index" # Path fix
             vector_store = FAISS.load_local(
                 str(faiss_index_path), 
                 embeddings=_embeddings_obj, 
