@@ -1,28 +1,11 @@
-# requirements.txt
-# Versões alinhadas para garantir um build estável e compatível
-
-streamlit==1.35.0
-gunicorn==22.0.0
-
-# Bibliotecas principais
-pandas==2.2.2
-numpy==1.26.4
-
-# Firebase
-firebase-admin==6.5.0
-
-# Google Cloud Services
-google-cloud-secret-manager==2.19.0
-
-# LangChain e IA da Google (versões compatíveis)
-langchain==0.2.1
-langchain-core==0.2.3
-langchain-community==0.2.1
-langchain-google-genai==1.0.4
-pydantic==2.7.1
-faiss-cpu==1.8.0
-
-# Processamento de PDF
-PyMuPDF==1.24.1
-Pillow==10.3.0
-pypdf==4.2.0
+streamlit
+pandas
+numpy
+firebase-admin
+langchain
+langchain-community
+langchain-google-genai
+pydantic
+PyMuPDF
+Pillow
+faiss-cpu
