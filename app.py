@@ -26,7 +26,7 @@ def get_google_api_key():
     """Obtém a chave de API da Google do Secret Manager."""
     try:
         project_id = "contratiapy"
-        secret_id = "google-api-key" # O novo segredo que criámos
+        secret_id = "google-api-key"
         version_id = "latest"
         name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
         
@@ -36,7 +36,6 @@ def get_google_api_key():
     except Exception as e:
         st.error(f"Não foi possível obter a Chave de API do Secret Manager: {e}")
         return None
-
 
 def render_login_page(db):
     """Renderiza a página de login e cadastro."""
@@ -70,7 +69,7 @@ def render_login_page(db):
                 else:
                     st.error("As senhas não coincidem.")
 
-def render_main_app(db, BUCKET_NAME, embeddings):
+def render_main_app(db, BUCKET_NAME, embeddings, api_key):
     """Renderiza a aplicação principal após o login."""
     st.sidebar.title(f"Bem-vindo(a)!")
     st.sidebar.caption(st.session_state.user_email)
@@ -84,7 +83,8 @@ def render_main_app(db, BUCKET_NAME, embeddings):
         if modo == "Novo Upload":
             arquivos = st.file_uploader("Selecione PDFs", type="pdf", accept_multiple_files=True, key="upload_arquivos")
             if st.button("Processar Documentos", use_container_width=True, disabled=not arquivos):
-                vs, nomes = obter_vector_store_de_uploads(arquivos, embeddings)
+                # --- ALTERAÇÃO APLICADA AQUI ---
+                vs, nomes = obter_vector_store_de_uploads(arquivos, embeddings, api_key)
                 if vs and nomes:
                     st.session_state.messages = []
                     st.session_state.vector_store = vs
@@ -127,12 +127,13 @@ def render_main_app(db, BUCKET_NAME, embeddings):
         vector_store = st.session_state.vector_store
         nomes_arquivos = st.session_state.nomes_arquivos
         
-        with tabs[0]: render_chat_tab(vector_store, nomes_arquivos)
-        with tabs[1]: render_dashboard_tab(vector_store, nomes_arquivos)
-        with tabs[2]: render_resumo_tab(vector_store, nomes_arquivos)
-        with tabs[3]: render_riscos_tab(vector_store, nomes_arquivos)
-        with tabs[4]: render_prazos_tab(vector_store, nomes_arquivos)
-        with tabs[5]: render_conformidade_tab(vector_store, nomes_arquivos)
+        # --- ALTERAÇÃO APLICADA AQUI ---
+        with tabs[0]: render_chat_tab(vector_store, nomes_arquivos, api_key)
+        with tabs[1]: render_dashboard_tab(vector_store, nomes_arquivos, api_key)
+        with tabs[2]: render_resumo_tab(vector_store, nomes_arquivos, api_key)
+        with tabs[3]: render_riscos_tab(vector_store, nomes_arquivos, api_key)
+        with tabs[4]: render_prazos_tab(vector_store, nomes_arquivos, api_key)
+        with tabs[5]: render_conformidade_tab(vector_store, nomes_arquivos, api_key)
         with tabs[6]: render_anomalias_tab()
 
 def main():
@@ -144,9 +145,6 @@ def main():
         st.error("Falha na conexão com o banco de dados. Verifique os logs do serviço.")
         return
 
-    # --- CORREÇÃO APLICADA AQUI ---
-    # Obtemos a chave de API do Secret Manager e passamo-la diretamente
-    # ao construtor da biblioteca de embeddings.
     api_key = get_google_api_key()
     if not api_key:
         st.error("A Chave de API da Google não pôde ser carregada. A aplicação não pode continuar.")
@@ -162,7 +160,7 @@ def main():
     else:
         if "vector_store" not in st.session_state:
             st.session_state.vector_store = None
-        render_main_app(db, BUCKET_NAME, embeddings)
+        render_main_app(db, BUCKET_NAME, embeddings, api_key)
 
 if __name__ == "__main__":
     main()
