@@ -1,4 +1,4 @@
-# requirements.txt
+ requirements.txt
 # Versões fixas para garantir um build estável no Google Cloud Run
 
 streamlit==1.35.0
@@ -12,8 +12,6 @@ numpy==1.26.4
 firebase-admin==6.5.0
 
 # Google Cloud Services
-# --- CORREÇÃO APLICADA AQUI ---
-# Adicionada a biblioteca para aceder ao Secret Manager
 google-cloud-secret-manager==2.19.0
 
 # LangChain e IA da Google
@@ -27,3 +25,4 @@ faiss-cpu==1.8.0
 # Processamento de PDF
 PyMuPDF==1.24.1
 Pillow==10.3.0
+pypdf==4.2.0
