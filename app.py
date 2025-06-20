@@ -40,7 +40,6 @@ def get_google_api_key():
 def render_login_page(db):
     """Renderiza a página de login e cadastro."""
     st.title("Bem-vindo ao Analisador-IA ProMax")
-    st.image("https://i.imgur.com/aozL2jD.png", width=120)
     
     login_tab, register_tab = st.tabs(["Login", "Cadastrar"])
 
