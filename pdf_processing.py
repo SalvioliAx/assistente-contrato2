@@ -40,7 +40,7 @@ def _extrair_texto_com_gemini(pdf_bytes, nome_arquivo, llm_vision):
                 doc = Document(page_content=ai_msg.content, metadata={"source": nome_arquivo, "page": page_num, "method": "gemini_vision"})
                 documentos_gemini.append(doc)
                 texto_extraido = True
-            time.sleep(2)
+            time.sleep(2) # To respect API rate limits
         
         if texto_extraido:
             st.success(f"Texto extraído com Gemini Vision para {nome_arquivo}.")
@@ -53,7 +53,8 @@ def _extrair_texto_com_gemini(pdf_bytes, nome_arquivo, llm_vision):
     return documentos_gemini, texto_extraido
 
 @st.cache_resource
-def obter_vector_store_de_uploads(_lista_arquivos_pdf_upload, _embeddings_obj, api_key):
+# CORREÇÃO: Removido o parâmetro 'api_key' da assinatura da função.
+def obter_vector_store_de_uploads(_lista_arquivos_pdf_upload, _embeddings_obj):
     """
     Processa uma lista de arquivos PDF, extrai texto e cria um Vector Store FAISS.
     Usa PyMuPDF como método principal e Gemini Vision como fallback.
@@ -64,10 +65,11 @@ def obter_vector_store_de_uploads(_lista_arquivos_pdf_upload, _embeddings_obj, a
     documentos_totais = []
     nomes_arquivos_processados = []
     
+    # CORREÇÃO: Removido 'google_api_key'. A biblioteca usará a 
+    # variável de ambiente "GOOGLE_API_KEY" que foi definida no app.py.
     llm_vision = ChatGoogleGenerativeAI(
         model="gemini-1.5-flash-latest", 
-        temperature=0.1, 
-        google_api_key=api_key
+        temperature=0.1
     )
 
     for arquivo_pdf in _lista_arquivos_pdf_upload:
@@ -78,8 +80,7 @@ def obter_vector_store_de_uploads(_lista_arquivos_pdf_upload, _embeddings_obj, a
         sucesso = False
         
         try:
-            # --- LÓGICA SIMPLIFICADA ---
-            # Tentativa 1: PyMuPDF (fitz) - agora é o método principal
+            # Tentativa 1: PyMuPDF (fitz) - método principal
             st.write(f"A extrair texto com PyMuPDF para {nome_arquivo}...")
             arquivo_pdf.seek(0)
             doc_fitz = fitz.open(stream=arquivo_pdf.read(), filetype="pdf")
