@@ -1,168 +1,152 @@
-# app.py
+# firebase_utils.py
 """
-Ponto de entrada principal da aplicação Streamlit "Analisador-IA ProMax".
+Este módulo centraliza todas as interações com o Google Firebase.
+Versão modificada para funcionar no Google Cloud Run com o Secret Manager.
 """
 import streamlit as st
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from google.cloud import secretmanager # Importar o cliente do Secret Manager
+import firebase_admin
+from firebase_admin import credentials, firestore, storage
+import json
+import os
+from pathlib import Path
+from langchain_community.vectorstores import FAISS
+import tempfile
 
-from firebase_utils import (
-    initialize_services, 
-    listar_colecoes_salvas, 
-    salvar_colecao_atual, 
-    carregar_colecao
-)
-from auth_utils import register_user, login_user
-from pdf_processing import obter_vector_store_de_uploads
-from ui_tabs import (
-    render_chat_tab, render_dashboard_tab, render_resumo_tab, 
-    render_riscos_tab, render_prazos_tab, render_conformidade_tab, 
-    render_anomalias_tab
-)
+# Importar o cliente do Secret Manager
+from google.cloud import secretmanager
 
-# --- NOVA FUNÇÃO AUXILIAR ---
-@st.cache_resource
-def get_google_api_key():
-    """Obtém a chave de API da Google do Secret Manager."""
+@st.cache_resource(show_spinner="A ligar aos serviços...")
+def initialize_services():
+    """
+    Inicializa o Firebase Admin SDK. Outras bibliotecas da Google (como a LangChain)
+    usarão as credenciais do ambiente fornecidas automaticamente pelo Cloud Run.
+    """
     try:
-        project_id = "contratiapy"
-        secret_id = "google-api-key" # O novo segredo que criámos
-        version_id = "latest"
-        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+        # Só executa a configuração uma vez
+        if not firebase_admin._apps:
+            project_id = "contratiapy"
+            
+            # No Cloud Run, as bibliotecas da Google detetam as credenciais automaticamente.
+            # No entanto, o Firebase Admin SDK precisa de ser inicializado explicitamente.
+            # Vamos usar o Secret Manager para obter as credenciais apenas para o Firebase.
+            try:
+                # Obter credenciais do Secret Manager (para produção no Cloud Run)
+                secret_id = "firebase-credentials"
+                client = secretmanager.SecretManagerServiceClient()
+                name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+                response = client.access_secret_version(name=name)
+                creds_json_str = response.payload.data.decode('UTF-8')
+                creds_dict = json.loads(creds_json_str)
+                
+                cred = credentials.Certificate(creds_dict)
+                app_options = {'storageBucket': f"{project_id}.appspot.com"}
+                firebase_admin.initialize_app(cred, app_options)
+
+            except Exception as e_secret:
+                # Se o Secret Manager falhar (por exemplo, ao correr localmente),
+                # tentamos a inicialização padrão. Isto irá funcionar localmente se
+                # tiver executado `gcloud auth application-default login` no seu terminal.
+                st.warning(f"Não foi possível carregar as credenciais do Secret Manager ({e_secret}). A tentar usar as credenciais padrão do ambiente (ADC).")
+                try:
+                    cred = credentials.ApplicationDefault()
+                    app_options = {'storageBucket': f"{project_id}.appspot.com", 'projectId': project_id}
+                    firebase_admin.initialize_app(cred, app_options)
+                except Exception as e_default:
+                     st.error(f"Falha na inicialização padrão do Firebase. Certifique-se de que está autenticado se estiver a correr localmente. Erro: {e_default}")
+                     return None, None
+
+        # As outras bibliotecas (Langchain, SecretManager client, etc.) irão usar
+        # automaticamente as credenciais do ambiente (ADC), não sendo necessária
+        # mais nenhuma configuração manual.
+
+        db_client = firestore.client()
+        bucket_name = storage.bucket().name
         
-        client = secretmanager.SecretManagerServiceClient()
-        response = client.access_secret_version(name=name)
-        return response.payload.data.decode("UTF-8")
+        return db_client, bucket_name
     except Exception as e:
-        st.error(f"Não foi possível obter a Chave de API do Secret Manager: {e}")
-        return None
+        st.error(f"ERRO: Falha crítica ao inicializar os serviços. Detalhes: {e}")
+        return None, None
 
+# O resto das funções (listar_colecoes_salvas, etc.) não precisa de ser alterado.
+def listar_colecoes_salvas(db_client, user_id):
+    if not db_client or not user_id: return []
+    try:
+        colecoes_ref = db_client.collection('users').document(user_id).collection('ia_collections').stream()
+        return [doc.id for doc in colecoes_ref]
+    except Exception as e:
+        st.error(f"Erro ao listar coleções do Firebase: {e}")
+        return []
 
-def render_login_page(db):
-    """Renderiza a página de login e cadastro."""
-    st.title("Bem-vindo ao Analisador-IA ProMax")
-    st.image("https://i.imgur.com/aozL2jD.png", width=120)
-    
-    login_tab, register_tab = st.tabs(["Login", "Cadastrar"])
+def salvar_colecao_atual(db_client, user_id, nome_colecao, vector_store_atual, nomes_arquivos_atuais):
+    if not user_id:
+        st.error("Utilizador não identificado. Não é possível salvar a coleção.")
+        return False
+    with st.spinner(f"Salvando coleção '{nome_colecao}'..."):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                faiss_path = Path(temp_dir) / "faiss_index"
+                vector_store_atual.save_local(str(faiss_path))
+                zip_path_temp = Path(tempfile.gettempdir()) / f"{nome_colecao}.zip"
+                with zipfile.ZipFile(zip_path_temp, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for root, _, files in os.walk(faiss_path):
+                        for file in files:
+                            full_path = Path(root) / file
+                            relative_path = full_path.relative_to(Path(temp_dir))
+                            zipf.write(full_path, arcname=relative_path)
+                bucket = storage.bucket()
+                blob_path = f"user_collections/{user_id}/{nome_colecao}.zip"
+                blob = bucket.blob(blob_path)
+                blob.upload_from_filename(str(zip_path_temp))
+                doc_ref = db_client.collection('users').document(user_id).collection('ia_collections').document(nome_colecao)
+                doc_ref.set({
+                    'nomes_arquivos': nomes_arquivos_atuais,
+                    'storage_path': blob_path,
+                    'created_at': firestore.SERVER_TIMESTAMP
+                })
+                os.remove(zip_path_temp)
+                st.success(f"Coleção '{nome_colecao}' salva com sucesso!")
+                return True
+            except Exception as e:
+                st.error(f"Erro ao salvar coleção no Firebase: {e}")
+                return False
 
-    with login_tab:
-        with st.form("login_form"):
-            email = st.text_input("E-mail")
-            password = st.text_input("Senha", type="password")
-            submitted = st.form_submit_button("Login")
-            if submitted:
-                user_id = login_user(email, password)
-                if user_id:
-                    st.session_state.logged_in = True
-                    st.session_state.user_id = user_id
-                    st.session_state.user_email = email
-                    st.rerun()
-
-    with register_tab:
-        with st.form("register_form"):
-            new_email = st.text_input("Seu E-mail")
-            new_password = st.text_input("Crie uma Senha", type="password")
-            confirm_password = st.text_input("Confirme a Senha", type="password")
-            submitted = st.form_submit_button("Cadastrar")
-            if submitted:
-                if new_password == confirm_password:
-                    register_user(new_email, new_password)
-                else:
-                    st.error("As senhas não coincidem.")
-
-def render_main_app(db, BUCKET_NAME, embeddings):
-    """Renderiza a aplicação principal após o login."""
-    st.sidebar.title(f"Bem-vindo(a)!")
-    st.sidebar.caption(st.session_state.user_email)
-    
-    with st.sidebar:
-        st.header("Gerenciar Documentos")
-        user_id = st.session_state.user_id
-
-        modo = st.radio("Carregar documentos:", ("Novo Upload", "Carregar Coleção"), key="modo_carregamento")
-
-        if modo == "Novo Upload":
-            arquivos = st.file_uploader("Selecione PDFs", type="pdf", accept_multiple_files=True, key="upload_arquivos")
-            if st.button("Processar Documentos", use_container_width=True, disabled=not arquivos):
-                vs, nomes = obter_vector_store_de_uploads(arquivos, embeddings)
-                if vs and nomes:
-                    st.session_state.messages = []
-                    st.session_state.vector_store = vs
-                    st.session_state.nomes_arquivos = nomes
-                    st.session_state.colecao_ativa = None
-                    st.rerun()
-        else:
-            colecoes = listar_colecoes_salvas(db, user_id)
-            if colecoes:
-                sel = st.selectbox("Escolha uma coleção:", colecoes, index=None, placeholder="Selecione...", key="select_colecao")
-                if st.button("Carregar Coleção", use_container_width=True, disabled=not sel):
-                    vs, nomes = carregar_colecao(db, embeddings, user_id, sel)
-                    if vs and nomes:
-                        st.session_state.messages = []
-                        st.session_state.vector_store = vs
-                        st.session_state.nomes_arquivos = nomes
-                        st.session_state.colecao_ativa = sel
-                        st.rerun()
-            else:
-                st.info("Nenhuma coleção salva.")
-
-        if st.session_state.get("vector_store") and modo == "Novo Upload":
-            st.markdown("---")
-            st.subheader("Salvar Coleção Atual")
-            nome_colecao = st.text_input("Nome para a nova coleção:", key="nome_nova_colecao")
-            if st.button("Salvar", use_container_width=True, disabled=not nome_colecao):
-                salvar_colecao_atual(db, user_id, nome_colecao, st.session_state.vector_store, st.session_state.nomes_arquivos)
+def carregar_colecao(_db_client, _embeddings_obj, user_id, nome_colecao):
+    if not user_id:
+        st.error("Utilizador não identificado. Não é possível carregar a coleção.")
+        return None, None
+    try:
+        doc_ref = _db_client.collection('users').document(user_id).collection('ia_collections').document(nome_colecao)
+        doc = doc_ref.get()
+        if not doc.exists:
+            st.error(f"Coleção '{nome_colecao}' não encontrada.")
+            return None, None
         
-        st.sidebar.markdown("<hr>", unsafe_allow_html=True)
-        if st.sidebar.button("Logout"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+        metadata = doc.to_dict()
+        storage_path = metadata.get('storage_path')
+        nomes_arquivos = metadata.get('nomes_arquivos')
 
-    st.title("💡 Analisador-IA ProMax")
-    if not st.session_state.get("vector_store"):
-        st.info("👈 Por favor, carregue documentos ou uma coleção para começar.")
-    else:
-        tabs = st.tabs(["💬 Chat", "📈 Dashboard", "📜 Resumo", "🚩 Riscos", "🗓️ Prazos", "⚖️ Conformidade", "📊 Anomalias"])
-        vector_store = st.session_state.vector_store
-        nomes_arquivos = st.session_state.nomes_arquivos
-        
-        with tabs[0]: render_chat_tab(vector_store, nomes_arquivos)
-        with tabs[1]: render_dashboard_tab(vector_store, nomes_arquivos)
-        with tabs[2]: render_resumo_tab(vector_store, nomes_arquivos)
-        with tabs[3]: render_riscos_tab(vector_store, nomes_arquivos)
-        with tabs[4]: render_prazos_tab(vector_store, nomes_arquivos)
-        with tabs[5]: render_conformidade_tab(vector_store, nomes_arquivos)
-        with tabs[6]: render_anomalias_tab()
+        bucket = storage.bucket()
+        blob = bucket.blob(storage_path)
 
-def main():
-    """Função principal que gerencia o fluxo da aplicação."""
-    st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
-    
-    db, BUCKET_NAME = initialize_services()
-    if not db:
-        st.error("Falha na conexão com o banco de dados. Verifique os logs do serviço.")
-        return
+        with tempfile.TemporaryDirectory() as temp_dir:
+            zip_path_temp = Path(temp_dir) / "colecao.zip"
+            st.info(f"Baixando índice de '{nome_colecao}'...")
+            blob.download_to_filename(str(zip_path_temp))
 
-    # --- CORREÇÃO APLICADA AQUI ---
-    # Obtemos a chave de API do Secret Manager e passamo-la diretamente
-    # ao construtor da biblioteca de embeddings.
-    api_key = get_google_api_key()
-    if not api_key:
-        st.error("A Chave de API da Google não pôde ser carregada. A aplicação não pode continuar.")
-        return
-        
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
-
-    if "logged_in" not in st.session_state:
-        st.session_state.logged_in = False
-
-    if not st.session_state.logged_in:
-        render_login_page(db)
-    else:
-        if "vector_store" not in st.session_state:
-            st.session_state.vector_store = None
-        render_main_app(db, BUCKET_NAME, embeddings)
-
-if __name__ == "__main__":
-    main()
+            unzip_path = Path(temp_dir) / "unzipped"
+            unzip_path.mkdir()
+            with zipfile.ZipFile(zip_path_temp, 'r') as zip_ref:
+                zip_ref.extractall(unzip_path)
+            
+            faiss_index_path = unzip_path / "faiss_index"
+            vector_store = FAISS.load_local(
+                str(faiss_index_path), 
+                embeddings=_embeddings_obj, 
+                allow_dangerous_deserialization=True
+            )
+            
+            st.success(f"Coleção '{nome_colecao}' carregada com sucesso!")
+            return vector_store, nomes_arquivos
+    except Exception as e:
+        st.error(f"Erro ao carregar coleção '{nome_colecao}': {e}")
+        return None, None
