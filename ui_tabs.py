@@ -64,21 +64,27 @@ def render_chat_tab(vector_store, nomes_arquivos, t):
             with st.spinner(t["chat_spinner_text"]):
                 llm_chat = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
                 
-                prompt_template = """
-                Use os seguintes trechos de contexto para responder à pergunta no final.
-                A sua tarefa é sintetizar a informação e fornecer uma resposta precisa e direta.
-                Se não souber a resposta ou se a informação não estiver no contexto, diga apenas que não encontrou a informação, não tente inventar uma resposta.
-                Responda sempre no idioma da pergunta.
+                # --- ALTERAÇÃO APLICADA AQUI ---
+                # Define a língua de resposta com base na seleção do sistema.
+                # Garante que 'language_name' exista no seu ficheiro translations.py
+                # Ex: "language_name": "Português (Brasil)"
+                system_language = t.get("language_name", "Português") # Define um padrão seguro
+                
+                instruction = f"Responda sempre em {system_language}."
 
-                Contexto:
-                {context}
-
-                Pergunta:
-                {question}
-
-                Resposta Útil:"""
+                prompt_template = (
+                    "Use os seguintes trechos de contexto para responder à pergunta no final.\n"
+                    "A sua tarefa é sintetizar a informação e fornecer uma resposta precisa e direta.\n"
+                    "Se não souber a resposta ou se a informação não estiver no contexto, diga apenas que não encontrou a informação, não tente inventar uma resposta.\n"
+                    f"{instruction}\n\n"
+                    "Contexto:\n{context}\n\n"
+                    "Pergunta:\n{question}\n\n"
+                    "Resposta Útil:"
+                )
                 
                 PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+                # --- FIM DA ALTERAÇÃO ---
+                
                 chain_type_kwargs = {"prompt": PROMPT}
                 
                 qa_chain = RetrievalQA.from_chain_type(
@@ -242,7 +248,7 @@ def render_anomalias_tab(t):
         st.warning(t["anomalies_no_data_warning"])
         return
 
-    if st.button(t["anomalies_button_label"], key="btn_anomalias", use_container_width=True):
+    if st.button(t["anomalias_button_label"], key="btn_anomalias", use_container_width=True):
         resultados = detectar_anomalias_no_dataframe(st.session_state.df_dashboard, t)
         st.session_state.anomalias_resultados = resultados
 
