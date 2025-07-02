@@ -5,6 +5,7 @@ Este módulo centraliza todos os textos da interface para suportar múltiplos id
 
 TRANSLATIONS = {
     "pt": {
+        "language_name": "Português (Brasil)",
         "welcome_title": "Bem-vindo ao Analisador-IA ProMax",
         "login_tab": "Login",
         "register_tab": "Cadastrar",
@@ -132,6 +133,7 @@ TRANSLATIONS = {
         "language_selector_label": "Idioma / Language / Idioma",
     },
     "en": {
+        "language_name": "English",
         "welcome_title": "Welcome to AI-Analyzer ProMax",
         "login_tab": "Login",
         "register_tab": "Register",
@@ -259,6 +261,7 @@ TRANSLATIONS = {
         "language_selector_label": "Idioma / Language / Idioma",
     },
     "es": {
+        "language_name": "Español",
         "welcome_title": "Bienvenido al Analizador-IA ProMax",
         "login_tab": "Iniciar Sesión",
         "register_tab": "Registrarse",
