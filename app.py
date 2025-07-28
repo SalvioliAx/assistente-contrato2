@@ -135,6 +135,13 @@ def render_main_app(db, BUCKET_NAME, embeddings, t):
         with tabs[5]: render_conformidade_tab(vector_store, nomes_arquivos, t)
         with tabs[6]: render_anomalias_tab(t)
 
+# Use st.cache_resource to initialize the embeddings model
+# This ensures it's created only once and correctly handles potential async aspects
+@st.cache_resource
+def get_gemini_embeddings_model():
+    """Initializes and caches the GoogleGenerativeAIEmbeddings model."""
+    return GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+
 def main():
     """Função principal que gerencia o fluxo da aplicação."""
     st.set_page_config(layout="wide", page_title="Analisador-IA ProMax", page_icon="💡")
@@ -175,7 +182,8 @@ def main():
         st.error(t["db_connection_error"])
         return
 
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    # Call the cached function to get the embeddings model
+    embeddings = get_gemini_embeddings_model()
 
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
