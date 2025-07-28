@@ -3,6 +3,13 @@
 Ponto de entrada principal da aplicação Streamlit "Analisador-IA ProMax".
 """
 import streamlit as st
+import asyncio
+
+try:
+    loop = asyncio.get_event_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 # Importa o dicionário de traduções
