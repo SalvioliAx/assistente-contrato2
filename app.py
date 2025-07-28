@@ -135,11 +135,11 @@ def render_main_app(db, BUCKET_NAME, embeddings, t):
         with tabs[5]: render_conformidade_tab(vector_store, nomes_arquivos, t)
         with tabs[6]: render_anomalias_tab(t)
 
-# Use st.cache_resource to initialize the embeddings model
-# This ensures it's created only once and correctly handles potential async aspects
+# Use st.cache_resource para inicializar o modelo de embeddings
+# Isso garante que ele seja criado apenas uma vez e lida corretamente com aspectos assíncronos
 @st.cache_resource
 def get_gemini_embeddings_model():
-    """Initializes and caches the GoogleGenerativeAIEmbeddings model."""
+    """Inicializa e armazena em cache o modelo GoogleGenerativeAIEmbeddings."""
     return GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
 def main():
@@ -182,7 +182,7 @@ def main():
         st.error(t["db_connection_error"])
         return
 
-    # Call the cached function to get the embeddings model
+    # Chama a função em cache para obter o modelo de embeddings
     embeddings = get_gemini_embeddings_model()
 
     if "logged_in" not in st.session_state:
