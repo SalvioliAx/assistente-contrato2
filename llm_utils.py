@@ -12,7 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import FAISS
-from data_models import InfoContrato
+from data_models import InfoContrato, EventoContratual, ListaDeEventos
 import numpy as np
 
 @st.cache_data(show_spinner=False)
@@ -44,7 +44,8 @@ def extrair_dados_dos_contratos(_vector_store: Optional[FAISS], _nomes_arquivos:
             dados_contrato_atual = {"arquivo_fonte": nome_arquivo}
             retriever_arquivo_atual = _vector_store.as_retriever(
                 search_type="similarity",
-                search_kwargs={'filter': {'source': nome_arquivo}, 'k': 5}
+                # Aumentando 'k' para recuperar mais documentos relevantes
+                search_kwargs={'filter': {'source': nome_arquivo}, 'k': 8} 
             )
             
             for campo, (pergunta, instrucao) in mapa_campos_para_extracao.items():
@@ -126,19 +127,55 @@ def analisar_documento_para_riscos(texto_completo: str, nome_arquivo: str, _t: d
 
 @st.cache_data(show_spinner=False)
 def extrair_eventos_dos_contratos(textos_completos: List[Dict], _t: dict) -> List[Dict]:
-    """Extrai datas e eventos importantes de uma lista de documentos."""
+    """
+    Extrai datas e eventos importantes de uma lista de documentos usando o LLM
+    e o esquema Pydantic para estruturar a saída.
+    """
     with st.spinner(_t["extracting_deadlines_spinner"]):
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0) # Temperatura baixa para precisão na extração estruturada
+        
         eventos_finais = []
+        
         for doc in textos_completos:
-            datas = re.findall(r'\d{1,2} de \w+ de \d{4}', doc['texto'])
-            for data in datas:
-                eventos_finais.append({
-                    'Arquivo Fonte': doc['nome'], 
-                    'Evento': 'Data Mencionada', 
-                    'Data Informada': data, 
-                    'Trecho Relevante': 'N/A'
-                })
+            nome_arquivo = doc['nome']
+            texto_documento = doc['texto']
+            
+            # Prompt para instruir o LLM a extrair eventos e datas
+            prompt_template = PromptTemplate.from_template(
+                "Você é um assistente especializado em análise de contratos. "
+                "Sua tarefa é extrair todos os eventos contratuais importantes e suas datas correspondentes do texto fornecido. "
+                "Para cada evento, forneça uma descrição concisa, a data exata no formato YYYY-MM-DD (se disponível), e o trecho relevante do contrato. "
+                "Se a data não for explicitamente especificada, use 'Não Especificado'.\n\n"
+                "Formate sua resposta como uma lista JSON, onde cada item é um objeto com as chaves 'descricao_evento', 'data_evento_str', e 'trecho_relevante'.\n\n"
+                "Texto do Contrato '{nome_arquivo}':\n{texto}\n\n"
+                "Lista de Eventos (JSON):"
+            )
+            
+            chain = LLMChain(llm=llm, prompt=prompt_template)
+            
+            try:
+                # Limita o texto para evitar exceder o limite de tokens do LLM
+                response = chain.invoke({"nome_arquivo": nome_arquivo, "texto": texto_documento[:10000]})
+                
+                # Tenta parsear a resposta como JSON
+                eventos_json = response['text'].strip()
+                
+                # Valida e adiciona os eventos usando o modelo Pydantic
+                lista_eventos_validada = ListaDeEventos(eventos=[EventoContratual(**e) for e in eval(eventos_json)], arquivo_fonte=nome_arquivo)
+                
+                for evento in lista_eventos_validada.eventos:
+                    eventos_finais.append({
+                        'Arquivo Fonte': nome_arquivo,
+                        'Evento': evento.descricao_evento,
+                        'Data Informada': evento.data_evento_str,
+                        'Trecho Relevante': evento.trecho_relevante
+                    })
+            except Exception as e:
+                st.warning(f"Não foi possível extrair eventos do arquivo '{nome_arquivo}' devido a um erro: {e}")
+                continue # Continua para o próximo arquivo mesmo com erro
+
         return eventos_finais
+
 
 @st.cache_data(show_spinner=False)
 def verificar_conformidade_documento(texto_ref: str, nome_ref: str, texto_ana: str, nome_ana: str, _t: dict) -> str:
