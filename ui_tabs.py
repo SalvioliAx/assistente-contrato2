@@ -13,7 +13,7 @@ from llm_utils import (
     extrair_dados_dos_contratos, 
     gerar_resumo_executivo, 
     analisar_documento_para_riscos,
-    extrair_eventos_dos_contratos,
+    extrair_eventos_dos_contratos, # Importação atualizada
     verificar_conformidade_documento,
     detectar_anomalias_no_dataframe
 )
@@ -62,13 +62,10 @@ def render_chat_tab(vector_store, nomes_arquivos, t):
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             with st.spinner(t["chat_spinner_text"]):
-                llm_chat = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.2)
+                # Aumentando a temperatura para uma resposta mais flexível
+                llm_chat = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.5) 
                 
-                # --- ALTERAÇÃO APLICADA AQUI ---
-                # Define a língua de resposta com base na seleção do sistema.
-                # Garante que 'language_name' exista no seu ficheiro translations.py
-                # Ex: "language_name": "Português (Brasil)"
-                system_language = t.get("language_name", "Português") # Define um padrão seguro
+                system_language = t.get("language_name", "Português") 
                 
                 instruction = f"Responda sempre em {system_language}."
 
@@ -83,14 +80,14 @@ def render_chat_tab(vector_store, nomes_arquivos, t):
                 )
                 
                 PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-                # --- FIM DA ALTERAÇÃO ---
                 
                 chain_type_kwargs = {"prompt": PROMPT}
                 
                 qa_chain = RetrievalQA.from_chain_type(
                     llm=llm_chat, 
                     chain_type="stuff", 
-                    retriever=vector_store.as_retriever(search_kwargs={"k": 5}), 
+                    # Aumentando 'k' para recuperar mais documentos relevantes
+                    retriever=vector_store.as_retriever(search_kwargs={"k": 8}), 
                     chain_type_kwargs=chain_type_kwargs,
                     return_source_documents=True
                 )
