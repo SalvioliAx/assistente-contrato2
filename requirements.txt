@@ -8,4 +8,5 @@ langchain-google-genai
 pydantic
 PyMuPDF
 Pillow
+Pypdf
 faiss-cpu
